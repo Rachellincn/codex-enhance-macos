@@ -1,0 +1,23 @@
+.research/
+tools/
+**/bin/
+**/obj/
+dist/
+artifacts/
+node_modules/
+*.user
+
+# Local handoff, research notes, and design references
+PROJECT_STATE.md
+design-qa.md
+assets/selected-design.png
+docs/floating-widget-design.md
+docs/source-reuse-review.md
+docs/common-issues-research.md
+docs/native-search-verification.md
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.log
