@@ -1,3 +1,4 @@
+import { timingBreakdown } from './timing.mjs';
 export function firstOutputView(turn, now, runtimeConnected) {
   if (!turn) return { state: 'unknown' };
   if (Number.isFinite(turn.ttftMs) && turn.ttftMs >= 0) return { state: 'logged', ms: turn.ttftMs };
@@ -37,7 +38,7 @@ export function performanceView(state, currentTools, now, runtimeConnected) {
   const baselineMs = completed.length ? completed.length % 2 ? completed[(completed.length - 1) / 2] : (completed[completed.length / 2 - 1] + completed[completed.length / 2]) / 2 : null;
   const ratio = baselineMs > 0 && turn?.ttftMs != null ? turn.ttftMs / baselineMs : null;
   let stage = phase === 'waiting' ? turn?.waitReason || '等待输入' : phase === 'compacting' ? '正在压缩' : phase === 'working' ? running ? '工具执行中' : '正在处理' : phase === 'idle' ? '已完成' : phase === 'failed' ? '本轮未完成' : phase === 'interrupted' ? '已中断' : '状态待确认';
-  if (phase === 'working' && !running && progressGapMs >= 30000) stage = '等待可见进度';
+  if (phase === 'working' && !running && progressGapMs >= 30000) stage = '等待模型响应';
   const hints = [];
   if (turn?.problemNotice) hints.push(turn.problemNotice);
   if (phase === 'waiting') hints.push('当前在等待你的输入或确认，等待时间不应算作模型变慢。');
@@ -48,6 +49,7 @@ export function performanceView(state, currentTools, now, runtimeConnected) {
   if (phase === 'working' && !running && progressGapMs >= 30000) hints.push('暂时没有新的可见进度，不等于后台空转或卡死。');
   if (phase === 'idle' && turn?.hasUserInput && !turn.hasReply && !turn.wasCompaction && currentTools.length === 0) hints.push('本轮已结束，但记录里没有可见回复或工具产出；需打开原对话核对。');
   return { stage, progressGapMs, logGapMs, baselineMs, baselineSamples: completed.length, ttftRatio: ratio, recentTimings,
+    breakdown: timingBreakdown(turn,currentTools,now,runtimeConnected),
     recentTtftMs: recentTimedTurn?.ttftMs ?? null, recentTtftTurnId: recentTimedTurn?.id ?? null, recentTtftAtMs: recentTimedTurn?.completedAtMs ?? null,
     compactionElapsedMs: phase === 'compacting' && turn?.compactionStartedAtMs ? Math.max(0, now - turn.compactionStartedAtMs) : null,
     compactionHeartbeatGapMs: turn?.compactionHeartbeatAtMs ? Math.max(0, now - turn.compactionHeartbeatAtMs) : null,

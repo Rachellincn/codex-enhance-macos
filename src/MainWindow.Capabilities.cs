@@ -34,7 +34,7 @@ public partial class MainWindow
     {
         var stack = DetailStack();
         var heading = Text("", "Text", 16); heading.FontWeight = FontWeights.SemiBold; stack.Children.Add(heading);
-        Note(stack, "检查所选任务的 MCP 服务与工具目录，每 30 秒更新。已登记不等于执行成功；模型这一轮最终拿到的工具列表仍未验证。");
+        Note(stack, "每 30 秒更新服务连接和工具目录。已登记不代表调用成功。");
         var checkedAt = MetricRow(stack, "最近目录读取");
         var freshness = Text("", "Faint", 11); stack.Children.Add(freshness);
         DateTimeOffset refreshRequestedUntil = DateTimeOffset.MinValue;
@@ -53,7 +53,7 @@ public partial class MainWindow
         var services = new StackPanel(); stack.Children.Add(services);
         var observations = Text("", "Muted", 12); observations.Margin = new Thickness(0, 10, 0, 0); stack.Children.Add(observations);
         var changes = Text("", "Muted", 12); changes.Margin = new Thickness(0, 16, 0, 0); stack.Children.Add(changes);
-        Note(stack, "目录减少也可能来自插件设置变化，不会仅凭这一点判定服务故障。检查不执行工具、不重载配置、不恢复旧任务。");
+        Note(stack, "目录变化可能来自插件设置；这里只检查状态，不执行工具。");
         Detail("Codex · 工具可用性", new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         string previous = ""; var expanded = new HashSet<string>();
         refreshDetail = () =>
@@ -83,7 +83,7 @@ public partial class MainWindow
                     string name = S(s["name"]); var row = new StackPanel { Margin = new Thickness(0, 0, 0, 14) };
                     MetricRow(row, ServiceTitle(name))($"{CapabilityState(S(s["runtimeStatus"]))} · " + (B(s["catalogComplete"]) ? $"{N(s["toolCount"]) ?? 0} 项" : "数量未确认"));
                     row.ToolTip = name;
-                    if (!B(s["catalogComplete"])) Note(row, "工具目录未完整读取，此服务的工具是否缺失尚不能确定。");
+                    if (!B(s["catalogComplete"])) Note(row, "目录读取不完整，暂无法判断工具是否缺失。");
                     var list = new StackPanel { Margin = new Thickness(8, 7, 0, 0) };
                     var toolScroll = new ScrollViewer { Content = list, MaxHeight = 180, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Visibility = expanded.Contains(name) ? Visibility.Visible : Visibility.Collapsed };
                     foreach (var tool in s["tools"] as JsonArray ?? new JsonArray()) { var text = Text(S(tool), "Muted", 11); text.Margin = new Thickness(0, 3, 0, 3); list.Children.Add(text); }

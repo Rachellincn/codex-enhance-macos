@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { classifyFailure } from './diagnostics.mjs';
 import { performanceView, turnProblemNotice, firstOutputView } from './performance.mjs';
+import { addTimingRange, observeTiming, elapsedTurnMs } from './timing.mjs';
+import {observeActivity,activityView} from './activity.mjs';
 
 const finite = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
 export function milliseconds(value) {
@@ -77,13 +79,20 @@ export function normalizeTool(item, meta = {}) {
   }
   const duration = finite(item.durationMs ?? item.duration_ms) ??
     (typeof item.duration === 'object' ? (item.duration.secs ?? 0) * 1000 + (item.duration.nanos ?? 0) / 1e6 : finite(item.duration));
-  let start = finite(meta.startedAtMs ?? item.startedAtMs);
+  let start = finite(meta.startedAtMs ?? item.startedAtMs) ?? (!meta.completed && meta.source === 'log' && status === 'running' ? finite(meta.timestamp) : null);
+  const anchoredEnd = finite(meta.completedAtMs ?? item.completedAtMs) ?? (status !== 'running' && meta.source === 'log' ? finite(meta.timestamp) : null);
+  const timingStart = start ?? (anchoredEnd !== null && duration !== null && duration >= 0 ? anchoredEnd-duration : null);
+  const timingEnd = anchoredEnd ?? (start !== null && duration !== null && duration >= 0 ? start+duration : null);
   const end = finite(meta.completedAtMs ?? item.completedAtMs) ?? (status !== 'running' ? finite(meta.timestamp) : null);
   if (start === null && end !== null && duration !== null) start = end - duration;
   const actualDuration = duration ?? (start !== null && end !== null ? Math.max(0, end - start) : null);
   return { id: String(item.id ?? hash([name, meta.turnId, start, end])), turnId: meta.turnId ?? '', name, label: toolLabel(`${item.server ?? ''}.${name}`, originalType),
     status, executionStatus, server: item.server ?? null, exitCode: Number.isInteger(exitCode) ? exitCode : null, category,
     startedAtMs: start, completedAtMs: end, durationMs: actualDuration, severity, reason, detail, quality, resultSummary,
+    timingStartAtMs: timingStart, timingEndAtMs: status === 'running' ? null : timingEnd,
+    seenRunningAtMs: status === 'running' ? finite(meta.timestamp) : null,
+    observedStartedAtMs: status === 'running' ? finite(meta.timestamp) : null,
+    timingApproximate: meta.source === 'runtime' && anchoredEnd === null,
     matchKey, resolved: false, source: meta.source ?? 'log' };
 }
 
@@ -101,6 +110,10 @@ export class ThreadState {
     if (!this.turns.has(id)) this.turns.set(id, { id, startedAtMs: at || null, completedAtMs: null, durationMs: null, ttftMs: null, phase: 'working', model: this.model, effort: this.effort });
     if (at >= this.latestTurnAt) { this.latestTurnAt = at; this.latestTurnId = id; }
     return this.turns.get(id);
+  }
+  pauseTiming() {
+    const turn = this.turns.get(this.latestTurnId);
+    if (turn) { turn.timingObservation = null; turn.liveActivity = null; }
   }
   applyUsage(info, at) {
     const last = normalizeUsage(info.last_token_usage ?? info.last ?? info.usage);
@@ -124,6 +137,9 @@ export class ThreadState {
     if (old && old.status !== 'running' && tool.status === 'running') return;
     if (old?.source === 'log' && old.status !== 'running' && tool.source === 'runtime') return;
     if (old) tool = { ...old, ...tool, startedAtMs: tool.startedAtMs ?? old.startedAtMs,
+      observedStartedAtMs: old.observedStartedAtMs ?? tool.observedStartedAtMs, seenRunningAtMs: tool.seenRunningAtMs ?? old.seenRunningAtMs,
+      timingStartAtMs: tool.timingStartAtMs ?? old.timingStartAtMs,
+      timingEndAtMs: tool.timingEndAtMs ?? old.timingEndAtMs ?? (tool.status !== 'running' && old.observedStartedAtMs ? tool.completedAtMs : null),
       durationMs: tool.durationMs ?? old.durationMs, resolved: old.resolved && tool.severity === old.severity };
     this.tools.set(tool.id, tool);
     if (tool.status === 'completed' && tool.executionStatus !== 'failed' && tool.server) for (const previous of this.tools.values()) {
@@ -136,7 +152,10 @@ export class ThreadState {
     }
     if (this.tools.size > 1000) {
       const removable = [...this.tools.values()].filter(t => t.status !== 'running').sort((a, b) => (a.completedAtMs ?? 0) - (b.completedAtMs ?? 0));
-      for (const t of removable.slice(0, this.tools.size - 800)) this.tools.delete(t.id);
+      for (const t of removable.slice(0, this.tools.size - 800)) {
+        addTimingRange(this.turns.get(t.turnId),'tools',t.timingStartAtMs??t.observedStartedAtMs,t.timingEndAtMs);
+        this.tools.delete(t.id);
+      }
     }
   }
   record(row) {
@@ -196,7 +215,11 @@ export class ThreadState {
         if (turn) turn.wasCompaction = true;
         if (turn && !completed) { turn.phase = 'compacting'; turn.compactionStartedAtMs ??= p.started_at_ms ?? at; }
         if (completed) {
-          if (turn) { turn.compactionCompletedAtMs = p.completed_at_ms ?? at; if (turn.phase === 'compacting' && !turn.completedAtMs) turn.phase = 'working'; }
+          if (turn) {
+            turn.compactionCompletedAtMs = p.completed_at_ms ?? at;
+            addTimingRange(turn,'compacting',p.started_at_ms??turn.compactionStartedAtMs,turn.compactionCompletedAtMs);
+            if (turn.phase === 'compacting' && !turn.completedAtMs) turn.phase = 'working';
+          }
           this.lastCompaction ??= { before: null, after: null, at };
           this.lastCompaction.durationMs = p.completed_at_ms != null && p.started_at_ms != null ? p.completed_at_ms - p.started_at_ms : null;
         }
@@ -240,9 +263,20 @@ export class ThreadState {
     if (latest && !latest.completedAtMs && data.threadStatus?.activeFlags?.some(flag => /waiting/i.test(flag))) {
       latest.phase = 'waiting'; latest.waitReason = data.threadStatus.activeFlags.some(flag => /approval/i.test(flag)) ? '等待确认' : '等待输入';
     }
+    const currentRuntime = latest && data.turns.find(t=>(t.id??t.turnId)===latest.id);
+    if (latest && (currentRuntime || data.threadStatus?.activeFlags?.some(flag=>/waiting/i.test(flag)))) {
+      const runningTools = [...this.tools.values()].some(t=>t.turnId===latest.id && ['running','unknown'].includes(t.status));
+      // This is time in an observed active model phase, including response and
+      // provider/network waiting. It is not a measurement of pure reasoning.
+      const modelActive = !!currentRuntime && /^(inprogress|in_progress|active|running)$/i.test(currentRuntime.status??'') && !runningTools;
+      observeTiming(latest,now,{modelActive});
+      observeActivity(latest,[...this.tools.values()].filter(t=>t.turnId===latest.id),now);
+    }
+    else if (latest) { latest.timingObservation=null; latest.liveActivity=null; }
   }
   snapshot(now = Date.now(), runtimeConnected = false) {
     const turn = this.turns.get(this.latestTurnId);
+    if (!runtimeConnected) this.pauseTiming();
     const all = [...this.tools.values()].map(t => !runtimeConnected && t.status === 'running' && t.source === 'runtime' ? { ...t, status: 'unknown' } : t)
       .sort((a, b) => (b.startedAtMs ?? b.completedAtMs ?? 0) - (a.startedAtMs ?? a.completedAtMs ?? 0));
     const current = all.filter(t => t.turnId === this.latestTurnId);
@@ -257,10 +291,11 @@ export class ThreadState {
     let phase = turn?.phase ?? 'unknown';
     if (phase === 'working' && !runtimeConnected && now - this.lastActivityAt > 120000) phase = 'unknown';
     return { threadId: this.id, title: this.title, model: this.model, effort: this.effort, turnId: this.latestTurnId,
-      phase, startedAtMs: turn?.startedAtMs, elapsedMs: turn?.durationMs ?? (turn?.startedAtMs ? Math.max(0, now - turn.startedAtMs) : null),
+      phase, startedAtMs: turn?.startedAtMs, elapsedMs: elapsedTurnMs(turn,now),
       ttftMs: turn?.ttftMs ?? null, firstOutput: firstOutputView(turn, now, runtimeConnected), context: this.context, cacheHit: this.cacheHit, totalTokens: this.totalTokens,
       compactions: this.compactions, lastCompaction: this.lastCompaction,
       performance: performanceView(this, current, now, runtimeConnected),
+      activity: activityView(turn,current,now,runtimeConnected),
       tools: { running: running.filter(t => t.status === 'running').length, completed: current.filter(t => t.status === 'completed').length,
         attention: attention.length, notes: notes.length, highestSeverity, levelCounts, issues: attention.slice(0, 20), items: all.slice(0, 100), runtimeAvailable: runtimeConnected },
       updatedAtMs: now };

@@ -48,6 +48,17 @@ public static class Verification
         var secret = JsonNode.Parse("""{"title":"PRIVATE","threadId":"PRIVATE","context":{"used":100,"path":"PRIVATE"},"tools":{"items":[{"name":"PRIVATE","command":"PRIVATE","detail":"PRIVATE","severity":"error","exitCode":1,"durationMs":12}]},"connection":{"cdp":"connected","runtime":true,"message":"PRIVATE"}}""")!.AsObject();
         string report = DiagnosticReport.Create(secret).ToJsonString();
         Check(!report.Contains("PRIVATE") && report.Contains("exitCode") && report.Contains("100"), "diagnostic export contains allowed metrics without private snapshot fields");
+        var activity = JsonNode.Parse("""{"activity":{"kind":"model","startedAtMs":10000,"observedAtMs":20000,"items":[]}}""")!.AsObject();
+        var modelPhase = MainWindow.ActivityPresentation(activity,20000,false);
+        Check(modelPhase.Title=="思考 / 响应"&&modelPhase.Timer=="00:10", "current model phase displays its own duration");
+        activity["activity"] = JsonNode.Parse("""{"kind":"tools","startedAtMs":19000,"observedAtMs":20000,"items":[{"label":"终端执行"},{"label":"网页检索"}]}""");
+        var toolPhase=MainWindow.ActivityPresentation(activity,20000,false);
+        Check(toolPhase.Title=="调用工具"&&toolPhase.Timer=="00:01", "switching to tools resets the displayed stage duration");
+        Check(MainWindow.ActivityPresentation(activity,22000,false).Detail.Contains("网页检索"), "parallel tool labels rotate to the next active item");
+        Check(!MainWindow.ActivityPresentation(activity,30000,false).Active, "outdated observations cannot keep a live stage clock");
+        Check(MainWindow.ActivityPresentation(activity,20000,true).Timer=="—", "stale collector hides the stage clock");
+        activity["activity"] = new JsonObject { ["kind"]="complete" };
+        Check(!MainWindow.ActivityPresentation(activity,30000,false).Active&&MainWindow.ActivityPresentation(activity,30000,false).Timer=="—", "completed tasks do not show accumulated phase time");
         var owner = new Window { Width = 200, Height = 100, ShowInTaskbar = false, ShowActivated = false };
         var attached = new Window { Width = 100, Height = 80, ShowInTaskbar = false, ShowActivated = false };
         var ownerHandle = new WindowInteropHelper(owner).EnsureHandle(); var attachedHandle = new WindowInteropHelper(attached).EnsureHandle();

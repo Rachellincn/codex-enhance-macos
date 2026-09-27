@@ -6,6 +6,7 @@ import { Catalog } from './catalog.mjs';
 import { DesktopLink } from './cdp.mjs';
 import { CapabilityMonitor } from './capabilities.mjs';
 import { WeeklyQuota } from './quota.mjs';
+import {VoiceUsage} from './voice.mjs';
 
 const args = process.argv.slice(2);
 const value = (flag, fallback) => args.includes(flag) ? args[args.indexOf(flag) + 1] : fallback;
@@ -15,7 +16,10 @@ const seed = value('--thread', null);
 const catalog = new Catalog(home), desktop = new DesktopLink(stateDir);
 const capabilities = new CapabilityMonitor();
 const weekly = new WeeklyQuota(home, stateDir);
+const voiceUsage = new VoiceUsage(stateDir);
 let manualId = seed, lockedId = null, follow = true, lastId = null, stopping = false;
+let timedState = null;
+const pauseTiming = () => { timedState?.pauseTiming(); timedState = null; };
 const write = data => { if (!process.stdout.destroyed) process.stdout.write(`${JSON.stringify(data)}\n`); };
 const rl = readline.createInterface({ input: process.stdin });
 rl.on('line', line => {
@@ -28,6 +32,7 @@ rl.on('line', line => {
     if (command.type === 'stop') stopping = true;
     if (command.type === 'checkTools') capabilities.refresh(command.threadId ?? lastId);
     if (command.type === 'refreshQuota') weekly.refresh();
+    if (command.type === 'checkVoice') voiceUsage.inspect();
     if (command.type === 'quotaOptions') weekly.setOptions(command.options);
   } catch {}
 });
@@ -43,23 +48,26 @@ while (!stopping) {
     if (selectionReset) { lockedId = null; manualId = null; follow = true; }
     const current = await desktop.poll(lockedId ?? (!follow ? manualId : null));
     const id = lockedId ?? (!follow ? manualId : current.threadId ?? (!desktop.connected ? manualId : null));
+    if (timedState?.id !== id || !current.runtime) pauseTiming();
     const selection = lockedId ? 'locked' : !follow || (!desktop.connected && manualId) ? 'manual' : id ? 'auto' : 'none';
     const toolHealth = capabilities.sample(desktop.activeSession, id, Boolean(current.runtime));
     const quota = weekly.sample(desktop.activeSession);
+    const voice = voiceUsage.sample(desktop.activeSession,id);
     const connection = { cdp: desktop.connected ? 'connected' : 'waiting', runtime: Boolean(current.runtime), selection, selectionReset,
       message: !desktop.connected ? '下次正常启动 Codex 后启用自动跟随' : current.ambiguous ? '多个会话可见，请点击要跟随的输入区' : !id ? '当前页面没有可识别的本地任务' : '' };
     const recentThreads = catalog.recent();
     if (id) {
       const data = catalog.sample(id);
       if (data) {
+        timedState = data.state;
         if (current.runtime && (lockedId || id === current.threadId || !follow)) data.state.runtime(current.runtime);
         const snapshot = data.state.snapshot(Date.now(), desktop.connected && Boolean(current.runtime));
         lastId = id;
-        write({ schemaVersion: 1, ...snapshot, connection, toolHealth, quota, recentThreads, historyLoading: !data.caughtUp, readErrors: data.errors });
-      } else write({ schemaVersion: 1, threadId: id, phase: 'unknown', connection: { ...connection, message: '未找到这个任务的本地记录' }, quota, recentThreads, updatedAtMs: Date.now() });
-    } else write({ schemaVersion: 1, phase: 'unknown', connection, quota, recentThreads, updatedAtMs: Date.now() });
-  } catch (e) { write({ schemaVersion: 1, phase: 'unknown', error: String(e.message).slice(0, 180), connection: { cdp: 'waiting', selection: 'none', message: '采集暂不可用，正在重连' }, updatedAtMs: Date.now() }); }
+        write({ schemaVersion: 1, ...snapshot, connection, toolHealth, quota, voice, recentThreads, historyLoading: !data.caughtUp, readErrors: data.errors });
+      } else { pauseTiming(); write({ schemaVersion: 1, threadId: id, phase: 'unknown', connection: { ...connection, message: '未找到这个任务的本地记录' }, quota, voice, recentThreads, updatedAtMs: Date.now() }); }
+    } else write({ schemaVersion: 1, phase: 'unknown', connection, quota, voice, recentThreads, updatedAtMs: Date.now() });
+  } catch (e) { pauseTiming(); write({ schemaVersion: 1, phase: 'unknown', error: String(e.message).slice(0, 180), connection: { cdp: 'waiting', selection: 'none', message: '采集暂不可用，正在重连' }, updatedAtMs: Date.now() }); }
   if (args.includes('--once')) break;
   await new Promise(r => setTimeout(r, Math.max(100, 900 - (Date.now() - start))));
 }
-desktop.close(); catalog.close(); rl.close(); await weekly.close();
+voiceUsage.close(); desktop.close(); catalog.close(); rl.close(); await weekly.close();

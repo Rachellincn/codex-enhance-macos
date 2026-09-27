@@ -16,11 +16,9 @@ public partial class MainWindow
         double age = preview ? 0 : Math.Max(0, (DateTimeOffset.UtcNow - lastSnapshotReceived).TotalMilliseconds);
         bool stale = collectorFailed || age > 6000;
         bool connected = S(snapshot["connection"]?["cdp"]) == "connected";
-        FreshnessText.Text = preview ? "预览" : stale ? "更新延迟" : B(snapshot["historyLoading"]) ? "读取中" : connected && B(snapshot["connection"]?["runtime"]) ? "采集已连接" : connected ? "本地记录" : "未连接";
-        FreshnessText.ToolTip = preview ? "示例数据" : $"采集更新于 {Math.Floor(age / 1000):0} 秒前。展示所选对话最近一轮的可读记录，不代表所有工具都已检测或恢复。";
-        string phase = S(snapshot["phase"]);
-        var gap = N(snapshot["performance"]?["progressGapMs"]);
-        ProgressText.Text = stale ? "采集未更新，保留最近记录" : phase == "waiting" ? "等待你的输入或确认" : phase == "compacting" ? "正在整理上下文" : phase == "working" ? gap is null ? "等待新的进度记录" : $"可见进度 · {Duration(gap)} 前" : phase == "idle" ? "本轮已结束" : phase == "interrupted" ? "本轮已停止" : "以最近可读记录为准";
+        FreshnessText.Text = preview ? "预览" : stale ? "更新延迟" : B(snapshot["historyLoading"]) ? "读取中" : connected && B(snapshot["connection"]?["runtime"]) ? "已连接" : connected ? "本地记录" : "未连接";
+        FreshnessText.ToolTip = preview ? "示例数据" : $"{Math.Floor(age / 1000):0} 秒前更新";
+        UpdateActivity(stale);
         if (stale) { PhaseText.Text = "状态待更新"; PillPhase.Text = "状态待更新"; PhaseDot.Fill = PillDot.Fill = BrushFor("Faint"); }
     }
 
@@ -47,6 +45,8 @@ public partial class MainWindow
         Section(stack, "本轮进度");
         var phase = MetricRow(stack, "当前阶段"); var elapsed = MetricRow(stack, "本轮耗时");
         var progress = MetricRow(stack, "距可见进度变化"); var log = MetricRow(stack, "距最新日志");
+        Section(stack, "本轮耗时拆解");
+        var breakdown = new StackPanel(); stack.Children.Add(breakdown);
         Section(stack, "首字与近期表现");
         var liveOutput = MetricRow(stack, "本轮输出观测");
         var ttft = MetricRow(stack, "首字 · 本轮日志"); var baseline = MetricRow(stack, "同模型 / 强度中位数");
@@ -58,13 +58,18 @@ public partial class MainWindow
         Section(stack, "上下文压缩");
         var compact = MetricRow(stack, "次数 / 最近耗时"); var saved = MetricRow(stack, "最近压缩前 → 后");
         var hints = Text("", "Muted", 12); hints.Margin = new Thickness(0, 15, 0, 0); stack.Children.Add(hints);
-        Note(stack, "首字来自日志，不是屏幕绘制时间。图中仅含相同模型与强度的已完成轮次，越低表示首 token 等待越短。无新进度不等于卡死。");
+        Note(stack, "趋势仅比较相同模型与思考强度，数值越低表示首字等待越短。");
         Detail("Codex · 性能详情", new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-        string trendKey = "";
+        string trendKey = "", breakdownKey = "";
         refreshDetail = () =>
         {
             var p = snapshot["performance"];
-            phase(PhaseText.Text); elapsed(ElapsedText.Text); progress(Duration(N(p?["progressGapMs"]))); log(Duration(N(p?["logGapMs"])));
+            string timingKey=p?["breakdown"]?.ToJsonString()??"";
+            if (timingKey!=breakdownKey || breakdown.Children.Count==0) {
+                breakdownKey=timingKey; breakdown.Children.Clear();
+                RenderBreakdown(breakdown,p?["breakdown"]);
+            }
+            phase(PhaseText.Text); elapsed(Duration(N(snapshot["elapsedMs"]))); progress(Duration(N(p?["progressGapMs"]))); log(Duration(N(p?["logGapMs"])));
             ttft(Duration(N(snapshot["ttftMs"]))); baseline($"{Duration(N(p?["baselineMs"]))} · {N(p?["baselineSamples"]) ?? 0} 轮");
             liveOutput(S(snapshot["firstOutput"]?["state"]) == "observed" ? "≈" + Duration(N(snapshot["firstOutput"]?["ms"])) + " · 首条回复" : FirstTokenText.Text);
             context($"{N(snapshot["context"]?["used"])?.ToString("N0") ?? "—"} / {N(snapshot["context"]?["limit"])?.ToString("N0") ?? "—"}");
@@ -135,7 +140,7 @@ public partial class MainWindow
         Section(stack, "显示与跟随");
         MetricRow(stack, "显示方式")("附着 Codex · 随窗口遮挡和最小化");
         var selection = MetricRow(stack, "观察对象");
-        Note(stack, "切换其他应用不改变浮窗展开状态。“跟随对话”只决定查看哪条对话。更新时间与模型的输出进度是两回事。");
+        Note(stack, "浮窗随 Codex 窗口显示。“跟随对话”开启时，观察对象随页面切换。");
         Section(stack, "本地诊断");
         var actions = new StackPanel { Orientation = Orientation.Horizontal };
         var reconnect = new Button { Content = "重新连接", Padding = new Thickness(12, 8, 12, 8), Background = BrushFor("Hover") };

@@ -1,0 +1,35 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {ThreadState} from '../collector/state.mjs';
+const epoch=Date.parse('2026-09-27T00:00:00Z');
+const data=(items=[],status='inProgress')=>({turns:[{id:'turn',startedAtMs:epoch,status,items}]});
+const call=(id,start)=>({id,type:'commandExecution',status:'inProgress',startedAtMs:epoch+start});
+test('current phase resets between model and tools rather than reusing cumulative totals',()=>{
+ const s=new ThreadState('thread');s.runtime(data(),epoch+1000);s.runtime(data(),epoch+3000);
+ assert.equal(s.snapshot(epoch+4000,true).activity.elapsedMs,3000);
+ s.runtime(data([call('a',4000)]),epoch+5000);
+ let a=s.snapshot(epoch+6000,true).activity;assert.equal(a.kind,'tools');assert.equal(a.elapsedMs,2000);
+ s.runtime(data([{...call('a',4000),status:'completed',completedAtMs:epoch+6000}]),epoch+7000);
+ a=s.snapshot(epoch+8000,true).activity;assert.equal(a.kind,'model');assert.equal(a.elapsedMs,1000);
+});
+test('parallel tools retain one continuous phase, a new disjoint call starts a new timer',()=>{
+ const s=new ThreadState('thread');s.runtime(data([call('a',1000)]),epoch+2000);
+ s.runtime(data([call('a',1000),call('b',3000)]),epoch+4000);
+ assert.equal(s.snapshot(epoch+5000,true).activity.startedAtMs,epoch+1000);
+ s.runtime(data([{...call('a',1000),status:'completed',completedAtMs:epoch+5000},{...call('b',3000),status:'completed',completedAtMs:epoch+5000},call('c',6000)]),epoch+7000);
+ assert.equal(s.snapshot(epoch+8000,true).activity.elapsedMs,2000);
+});
+test('stale, disconnected and switched-away phases cannot keep a live timer',()=>{
+ const s=new ThreadState('thread');s.runtime(data(),epoch+1000);
+ assert.equal(s.snapshot(epoch+8000,true).activity.kind,'unknown');
+ s.runtime(data(),epoch+9000);assert.equal(s.snapshot(epoch+10000,false).activity.elapsedMs,null);
+ s.runtime(data(),epoch+11000);s.pauseTiming();assert.equal(s.snapshot(epoch+12000,true).activity.kind,'unknown');
+});
+test('approval, compaction and completion are distinct states with no completed timer',()=>{
+ const s=new ThreadState('thread');s.runtime({...data(),threadStatus:{activeFlags:['waitingOnApproval']}},epoch+1000);
+ assert.equal(s.snapshot(epoch+2000,true).activity.kind,'waiting');
+ s.runtime(data([{id:'compact',type:'contextCompaction',completed:false,startedAtMs:epoch+3000}]),epoch+4000);
+ assert.equal(s.snapshot(epoch+5000,true).activity.kind,'compacting');
+ s.runtime(data([],'completed'),epoch+6000);
+ const result=s.snapshot(epoch+20000,true).activity;assert.equal(result.kind,'complete');assert.equal(result.elapsedMs,null);
+});

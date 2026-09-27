@@ -36,7 +36,13 @@ Prompts, replies, commands, credentials, raw account IDs and full source paths a
 
 Indexing, incomplete current-period records, unknown prices/account identity, no usage, utilization below 3%, and a same-window quota rebound withhold projected totals. Normal presentation has no persistent confidence warning; details carry the evidence and assumptions.
 
-## Validation
+## Weekly history
+
+`quota-history.json` is a companion-owned numeric archive, separate from the disposable usage cache. After each complete weekly aggregate it atomically records the paired quota percentage, observation cutoff, real window boundaries, model totals and independent pricing components. It retains up to 26 periods per salted account key (104 total). Incomplete scans cannot replace a valid historical sample. Unknown accounts are not recorded or displayed as another account's history.
+
+At reset the preceding period becomes ended, preserving its last observed pair. An early change of reset window marks the replaced period as adjusted instead of showing two active weeks. Missing end-of-week samples are explicitly identified; the app does not invent a final percentage, reconstruct past weeks without quota observations, or combine post-cutoff usage with an old percentage. Each record uses its stored pricing date/components. Display switches reproject those components without overwriting the archived evidence. Corrupt archive files are preserved instead of silently replaced.
+
+## Feature verification
 
 Node coverage includes the four switch combinations, independent API pricing, cache-write distinction, unknown-speed alternatives, request deduplication, persistent tails, source immutability, and current/old/future/other-account issue and metadata scope. Native checks cover default migration, settings persistence and the same arithmetic combinations. Preview checks exercise the actual switches and expanded details.
 

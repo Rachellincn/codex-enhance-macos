@@ -29,7 +29,7 @@ test('silence is an observable hint, not a Critical; active tools and approval w
   const s = new ThreadState('task'); s.model = 'm'; s.effort = 'high'; s.turn('t', epoch);
   s.runtime({ turns: [{ id: 't', startedAtMs: epoch, status: 'inProgress', progressSignature: 'same', items: [] }] }, epoch + 1000);
   s.runtime({ turns: [{ id: 't', startedAtMs: epoch, status: 'inProgress', progressSignature: 'same', items: [] }] }, epoch + 40000);
-  let v = s.snapshot(epoch + 40000, true); assert.equal(v.performance.stage, '等待可见进度'); assert.equal(v.tools.levelCounts.critical, 0);
+  let v = s.snapshot(epoch + 40000, true); assert.equal(v.performance.stage, '等待模型响应'); assert.equal(v.tools.levelCounts.critical, 0);
   s.runtime({ turns: [{ id: 't', startedAtMs: epoch, status: 'inProgress', progressSignature: 'tool', items: [{ id: 'cmd', type: 'commandExecution', status: 'inProgress' }] }] }, epoch + 41000);
   assert.equal(s.snapshot(epoch + 50000, true).performance.stage, '工具执行中');
   s.runtime({ threadStatus: { activeFlags: ['waitingOnApproval'] }, turns: [] }, epoch + 60000);

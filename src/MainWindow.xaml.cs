@@ -10,6 +10,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using Forms = System.Windows.Forms;
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
     private Native.Point dragStart;
     private Native.Rect dragWindow;
     private Window? detailWindow;
+    private DropShadowEffect? detailShadow;
     private DateTimeOffset lastDiagnostic;
     private string appliedTheme = "";
     private bool renderMode;
@@ -99,6 +101,11 @@ public partial class MainWindow : Window
                 snapshot["quota"] = JsonNode.Parse(File.ReadAllText(quotaPath));
                 ApplySnapshot(snapshot); OpenQuota(this, new RoutedEventArgs());
             }
+            if (Arg("--metrics") is { } metricsPath) {
+                snapshot=JsonNode.Parse(File.ReadAllText(metricsPath))!.AsObject();
+                ApplySnapshot(snapshot);OpenMetrics(this,new RoutedEventArgs());
+            }
+            if (args.Contains("--weekly-history")) OpenQuotaHistory(this,new RoutedEventArgs());
             if (args.Contains("--picker"))
             {
                 var threads = new JsonArray();
@@ -164,7 +171,7 @@ public partial class MainWindow : Window
         var active = S(data["phase"]) is "working" or "compacting";
         PhaseDot.Fill = BrushFor(active ? "Accent" : "Faint");
         ContextText.Text = Percent(N(data["context"]?["percent"])); CacheText.Text = Percent(N(data["cacheHit"]));
-        ContextFill.Width = 85 * Math.Clamp(N(data["context"]?["percent"]) ?? 0, 0, 100) / 100;
+        ContextFill.Width = 83 * Math.Clamp(N(data["context"]?["percent"]) ?? 0, 0, 100) / 100;
         ContextText.ToolTip = "最近一次上下文采样，不是累计 token 消耗";
         CacheText.ToolTip = "最近一次请求的缓存输入占比";
         var model = S(data["model"]).Replace("gpt-6-astra", "Astra").Replace("gpt-6-sol", "Sol").Replace("gpt-6-luna", "Luna").Replace("gpt-", "GPT-");
@@ -180,7 +187,7 @@ public partial class MainWindow : Window
         var highestCount = (int)(N(data["tools"]?["levelCounts"]?[level]) ?? attention);
         var criticalCount = (level == "critical" ? highestCount : 0) + ((data["toolHealth"]?["issues"] as JsonArray)?.Count ?? 0);
         var records = (snapshot["tools"]?["items"] as JsonArray)?.OfType<JsonObject>().Count(t => S(t["turnId"]) == S(snapshot["turnId"])) ?? completed;
-        ToolsSummary.Text = criticalCount > 0 ? $"Critical · {criticalCount}" : realtime && running > 0 ? $"{running} 项进行中" : records > 0 ? $"本轮 · {records} 项" : active ? "等待调用记录" : "本轮暂无调用";
+        ToolsSummary.Text = criticalCount > 0 ? $"Critical · {criticalCount}" : active && realtime && running > 0 ? $"{running} 项进行中" : records > 0 ? $"本轮 · {records} 项" : active ? "等待调用记录" : "本轮暂无调用";
         if (criticalCount == 0 && S(data["toolHealth"]?["state"]) == "ready" &&
             (S(data["toolHealth"]?["watched"]?["state"]) is "missing" or "server_absent" || (data["toolHealth"]?["changes"] as JsonArray)?.Count > 0))
             ToolsSummary.Text = $"目录变化 · {records} 项调用";
@@ -215,13 +222,7 @@ public partial class MainWindow : Window
     }
     private void UpdateTime()
     {
-        double? elapsed = N(snapshot["elapsedMs"]);
-        if (S(snapshot["phase"]) == "compacting" && N(snapshot["performance"]?["compactionElapsedMs"]) is { } compactElapsed) elapsed = compactElapsed;
-        ElapsedText.ToolTip = S(snapshot["phase"]) == "compacting" ? "本次压缩已用时间" : "本轮总耗时，包含工具执行和等待";
-        if (elapsed is not null && S(snapshot["phase"]) is "working" or "compacting" && !preview)
-            elapsed += Math.Min(6000, Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (N(snapshot["updatedAtMs"]) ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())));
-        ElapsedText.Text = elapsed is null ? "—" : Clock(elapsed.Value);
-        PillMetric.Text = ElapsedText.Text;
+        UpdateActivity(!preview && (collectorFailed || (DateTimeOffset.UtcNow-lastSnapshotReceived).TotalMilliseconds>6000));
         UpdateFirstToken();
     }
     private void UpdateFirstToken()
@@ -265,7 +266,7 @@ public partial class MainWindow : Window
         ToolsDetails.Visibility = disclosure.ToolsExpanded ? Visibility.Visible : Visibility.Collapsed;
         ToolsChevron.Content = Icons.Create(disclosure.ToolsExpanded ? "chevron-down" : "chevron-right", 16);
         ToolsButton.SetValue(System.Windows.Automation.AutomationProperties.NameProperty, disclosure.ToolsExpanded ? "收起工具调用" : "展开工具调用");
-        Width = disclosure.Expanded ? 354 : 260;
+        Width = disclosure.Expanded ? 386 : 292;
     }
     private void PopulateTools()
     {
@@ -335,20 +336,22 @@ public partial class MainWindow : Window
     private Window Detail(string title, FrameworkElement content)
     {
         detailWindow?.Close();
-        var window = new Window { Title = title, Width = 450, Height = 550, WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent, Foreground = BrushFor("Text"), WindowStartupLocation = WindowStartupLocation.CenterScreen, Topmost = false, FontFamily = FontFamily, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = preview, Owner = this };
-        var frame = new Border { CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), BorderBrush = BrushFor("Stroke"), Background = BrushFor("Surface") };
+        var window = new Window { Title = title, Width = 482, Height = 582, WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent, Foreground = BrushFor("Text"), WindowStartupLocation = WindowStartupLocation.CenterScreen, Topmost = false, FontFamily = FontFamily, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = preview, Owner = this };
+        var frame = new Border { Margin=new Thickness(16), CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1), BorderBrush = BrushFor("Stroke"), Background = BrushFor("Surface") };
+        detailShadow=new DropShadowEffect { Color=Colors.Black, BlurRadius=28, ShadowDepth=5, Direction=270, Opacity=appliedTheme=="light"?.16:.42 };
+        var shell=new Grid();shell.Children.Add(new Border { Margin=new Thickness(16),CornerRadius=new CornerRadius(18),Background=BrushFor("Surface"),Effect=detailShadow,IsHitTestVisible=false });shell.Children.Add(frame);
         var layout = new Grid(); layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); layout.RowDefinitions.Add(new RowDefinition());
         var header = new DockPanel { Margin = new Thickness(19, 15, 15, 8), Background = Brushes.Transparent };
         var close = new Button { Width = 27, Height = 27, Content = Icons.Create("dismiss", 17), ToolTip = "关闭" }; close.Click += (_, _) => window.Close(); DockPanel.SetDock(close, Dock.Right); header.Children.Add(close);
         header.Children.Add(Text(title.Replace("Codex · ", ""), "Text", 16));
         header.MouseLeftButtonDown += (_, e) => { if (e.OriginalSource is TextBlock) window.DragMove(); };
-        layout.Children.Add(header); Grid.SetRow(content, 1); layout.Children.Add(content); frame.Child = layout; window.Content = frame;
+        layout.Children.Add(header); Grid.SetRow(content, 1); layout.Children.Add(content); frame.Child = layout; window.Content = shell;
         window.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) window.Close(); };
         detailWindow = window; window.Closed += (_, _) => { if (detailWindow == window) { detailWindow = null; refreshDetail = null; } };
         window.Loaded += (_, _) => {
             var area = Forms.Screen.FromHandle(handle).WorkingArea;
             double scale = Math.Max(1, Native.GetDpiForWindow(handle) / 96d);
-            window.Height = Math.Min(620, area.Height / scale - 40);
+            window.Height = Math.Min(652, area.Height / scale - 16);
             window.Left = Math.Clamp(Left - window.Width - 12, area.Left / scale + 12, Math.Max(area.Left / scale + 12, area.Right / scale - window.Width - 12));
             window.Top = Math.Clamp(Top, area.Top / scale + 12, Math.Max(area.Top / scale + 12, area.Bottom / scale - window.Height - 12));
         };
@@ -464,6 +467,7 @@ public partial class MainWindow : Window
         Add("查看调用记录", () => OpenHistory(this, new RoutedEventArgs()));
         Add("工具可用性检查", () => OpenCapabilities(this, new RoutedEventArgs()));
         Add("账号额度与等效金额", () => OpenQuota(this, new RoutedEventArgs()));
+        Add("语音连接", () => OpenVoice(this, new RoutedEventArgs()));
         Add("性能与压缩详情", () => OpenMetrics(this, new RoutedEventArgs()));
         Add("恢复默认位置", () => { settings.RightOffset = 22; settings.TopOffset = null; Save(); PositionNearHost(); });
         menu.Items.Add(new Separator());
@@ -479,14 +483,29 @@ public partial class MainWindow : Window
         if (theme == "system") { using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"); theme = (key?.GetValue("AppsUseLightTheme") as int? ?? 0) == 0 ? "dark" : "light"; }
         if (args.Contains("--light")) theme = "light";
         if (theme == appliedTheme) return; appliedTheme = theme;
-        var colors = theme == "light" ? new Dictionary<string, string> { ["Surface"]="#F8F8F8",["Stroke"]="#D4D4D4",["Text"]="#222222",["Muted"]="#616161",["Faint"]="#737373",["Line"]="#E1E1E1",["Track"]="#DDDDDD",["Hover"]="#EEEEEE",["Accent"]="#2672BA",["Attention"]="#93620A",["Error"]="#AE4038",["Critical"]="#B2243C" }
-            : new Dictionary<string, string> { ["Surface"]="#292929",["Stroke"]="#454545",["Text"]="#F3F3F3",["Muted"]="#B1B1B1",["Faint"]="#959595",["Line"]="#3A3A3A",["Track"]="#414141",["Hover"]="#383838",["Accent"]="#71ABEE",["Attention"]="#F0B456",["Error"]="#EF9B8E",["Critical"]="#FF7F8E" };
-        foreach (var pair in colors) Application.Current.Resources[pair.Key] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(pair.Value));
+        var colors = theme == "light" ? new Dictionary<string, string> { ["Surface"]="#FCFCFD",["Stroke"]="#DADDE2",["Text"]="#20232B",["Muted"]="#626B79",["Faint"]="#747D8B",["Line"]="#E9ECF0",["Track"]="#E0E5EB",["Hover"]="#F0F3F7",["Accent"]="#3478CA",["Attention"]="#946313",["Error"]="#AB493E",["Critical"]="#B52E49" }
+            : new Dictionary<string, string> { ["Surface"]="#25272C",["Stroke"]="#43464E",["Text"]="#F5F7FB",["Muted"]="#B6BECA",["Faint"]="#969FAE",["Line"]="#373B44",["Track"]="#424853",["Hover"]="#30343D",["Accent"]="#87B4FF",["Attention"]="#E8B875",["Error"]="#EEA193",["Critical"]="#FA879A" };
+        var oldColors=colors.Keys.Select(key=>(key,brush:Application.Current.Resources[key] as SolidColorBrush)).Where(p=>p.brush is not null).GroupBy(p=>p.brush!.Color).ToDictionary(g=>g.Key,g=>g.First().key);
+        foreach (var pair in colors) Application.Current.Resources[pair.Key]=new SolidColorBrush((Color)ColorConverter.ConvertFromString(pair.Value));
+        if(detailWindow is not null) RethemeVisual(detailWindow,oldColors);
+        SurfaceShadow.Opacity=theme=="light"?.16:.42;if(detailShadow is not null)detailShadow.Opacity=SurfaceShadow.Opacity;
         if (snapshot.Count > 0) { issuesKey = ""; ApplySnapshot(snapshot); }
+    }
+    private static void RethemeVisual(DependencyObject root,IReadOnlyDictionary<Color,string> palette)
+    {
+        void Bind(FrameworkElement element,DependencyProperty property) {
+            if(element.ReadLocalValue(property) is SolidColorBrush brush&&palette.TryGetValue(brush.Color,out var key))element.SetResourceReference(property,key);
+        }
+        if(root is Control control){Bind(control,Control.ForegroundProperty);Bind(control,Control.BackgroundProperty);Bind(control,Control.BorderBrushProperty);}
+        if(root is TextBlock text)Bind(text,TextBlock.ForegroundProperty);
+        if(root is Border border){Bind(border,Border.BackgroundProperty);Bind(border,Border.BorderBrushProperty);}
+        if(root is Panel panel)Bind(panel,Panel.BackgroundProperty);
+        if(root is System.Windows.Shapes.Shape shape){Bind(shape,System.Windows.Shapes.Shape.FillProperty);Bind(shape,System.Windows.Shapes.Shape.StrokeProperty);}
+        for(int i=0;i<VisualTreeHelper.GetChildrenCount(root);i++)RethemeVisual(VisualTreeHelper.GetChild(root,i),palette);
     }
     public static JsonObject Demo(bool attention, string level = "warning") => JsonNode.Parse("""
       {"threadId":"demo","title":"优化 Codex 状态浮窗","model":"gpt-6-astra","effort":"xhigh","phase":"working","turnId":"demo-turn","elapsedMs":86000,"ttftMs":2305,"context":{"used":100236,"limit":828400,"percent":12.1},"cacheHit":95.2,"totalTokens":22020349,"compactions":1,"lastCompaction":{"before":598000,"after":41000,"durationMs":175374},"tools":{"running":2,"completed":18,"attention":0,"issues":[],"items":[],"runtimeAvailable":true},"connection":{"cdp":"connected","runtime":true,"selection":"auto","message":""},"recentThreads":[],"performance":{"stage":"工具执行中","progressGapMs":2300,"logGapMs":1100,"baselineMs":3800,"baselineSamples":5,"recentTimings":[{"ttftMs":5100,"completedAtMs":1790416100000},{"ttftMs":4200,"completedAtMs":1790416200000},{"ttftMs":3800,"completedAtMs":1790416300000},{"ttftMs":2700,"completedAtMs":1790416400000},{"ttftMs":6200,"completedAtMs":1790416500000},{"ttftMs":2305,"completedAtMs":1790416600000}],"hints":[]},"updatedAtMs":0}
-      """)!.AsObject().WithAttention(attention, level);
+      """)!.AsObject().WithAttention(attention, level).WithDemoActivity();
     private void RenderAll()
     {
         string output = Path.GetFullPath(Arg("--render") ?? Path.Combine(AppContext.BaseDirectory, "renders")); Directory.CreateDirectory(output);
@@ -541,13 +560,18 @@ public partial class MainWindow : Window
     }
     private void Capture(string file)
     {
-        UpdateLayout(); Card.Measure(new Size(Width, double.PositiveInfinity)); Card.Arrange(new Rect(0, 0, Width, Card.DesiredSize.Height)); Card.UpdateLayout();
-        double scale = 2; var bitmap = new RenderTargetBitmap((int)Math.Ceiling(Card.ActualWidth * scale), (int)Math.Ceiling(Card.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32); bitmap.Render(Card);
+        UpdateLayout(); SurfaceRoot.Measure(new Size(Width, double.PositiveInfinity)); SurfaceRoot.Arrange(new Rect(0, 0, Width, SurfaceRoot.DesiredSize.Height)); SurfaceRoot.UpdateLayout();
+        double scale = 2; var bitmap = new RenderTargetBitmap((int)Math.Ceiling(SurfaceRoot.ActualWidth * scale), (int)Math.Ceiling(SurfaceRoot.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32); bitmap.Render(SurfaceRoot);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); using var output = File.Create(file); encoder.Save(output);
     }
 }
 internal static class DemoExtensions
 {
+    public static JsonObject WithDemoActivity(this JsonObject obj) {
+        long now=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        obj["activity"]=new JsonObject { ["kind"]="tools",["startedAtMs"]=now-20000,["observedAtMs"]=now,["elapsedMs"]=20000,["approximate"]=false,["items"]=JsonNode.Parse("""[{"id":"tool-a","label":"终端执行"},{"id":"tool-b","label":"网页检索"}]""") };
+        return obj;
+    }
     public static JsonObject WithAttention(this JsonObject obj, bool attention, string level = "warning")
     {
         if (!attention) return obj;
