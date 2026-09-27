@@ -29,7 +29,14 @@
       <Border Grid.Column="1" Background="{DynamicResource Line}" Margin="0,2"/>
       <StackPanel Grid.Column="2" Margin="17,0,0,0"><TextBlock Text="缓存命中" FontSize="12" Foreground="{DynamicResource Muted}"/><TextBlock x:Name="CacheText" Text="—" FontSize="20" FontWeight="SemiBold" Margin="0,5,0,0" Typography.NumeralAlignment="Tabular"/><TextBlock Text="最近请求" FontSize="10" Foreground="{DynamicResource Faint}" Margin="0,5,0,0"/></StackPanel>
       <Border Grid.Column="3" Background="{DynamicResource Line}" Margin="0,2"/>
-      <StackPanel Grid.Column="4" Margin="17,0,0,0"><TextBlock Text="首字（日志）" FontSize="11" Foreground="{DynamicResource Muted}"/><TextBlock x:Name="FirstTokenText" Text="—" FontSize="20" FontWeight="SemiBold" Margin="0,5,0,0" Typography.NumeralAlignment="Tabular"/><TextBlock x:Name="FirstTokenSource" Text="暂无记录" FontSize="10" Foreground="{DynamicResource Faint}" Margin="0,5,0,0"/></StackPanel>
+      <StackPanel Grid.Column="4" Margin="17,0,0,0"><TextBlock x:Name="FirstTokenLabel" Text="首字（日志）" FontSize="11" Foreground="{DynamicResource Muted}"/><TextBlock x:Name="FirstTokenText" Text="—" FontSize="20" FontWeight="SemiBold" Margin="0,5,0,0" Typography.NumeralAlignment="Tabular"/><TextBlock x:Name="FirstTokenSource" Text="暂无记录" FontSize="10" Foreground="{DynamicResource Faint}" Margin="0,5,0,0"/></StackPanel>
+     </Grid>
+    </Button>
+    <Border Height="1" Background="{DynamicResource Line}"/>
+    <Button Padding="19,12" Click="OpenQuota" HorizontalContentAlignment="Stretch" AutomationProperties.Name="查看账号额度与 API 等效金额">
+     <Grid Width="314"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <ContentControl x:Name="QuotaIcon" Margin="0,0,10,0"/><TextBlock Grid.Column="1" Text="账号额度" FontSize="14" FontWeight="Medium"/>
+      <TextBlock x:Name="QuotaSummary" Grid.Column="2" Text="正在读取" HorizontalAlignment="Right" FontSize="12" Foreground="{DynamicResource Muted}" Margin="8,0,10,0"/><ContentControl x:Name="QuotaChevron" Grid.Column="3"/>
      </Grid>
     </Button>
     <Border Height="1" Background="{DynamicResource Line}"/>
@@ -43,6 +50,7 @@
      <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="230" HorizontalScrollBarVisibility="Disabled"><StackPanel x:Name="IssueList"/></ScrollViewer>
      <Border Height="1" Background="{DynamicResource Line}" Margin="0,12,0,9"/>
      <Button Padding="0,3" HorizontalAlignment="Left" Click="OpenHistory" AutomationProperties.Name="查看全部调用"><StackPanel Orientation="Horizontal"><TextBlock Text="查看全部调用" Foreground="{DynamicResource Accent}" FontSize="13"/><ContentControl x:Name="HistoryArrow" Margin="7,2,0,0"/></StackPanel></Button>
+     <Button Padding="0,8,0,2" Margin="0,5,0,0" HorizontalContentAlignment="Stretch" Click="OpenCapabilities" AutomationProperties.Name="检查工具可用性"><Grid Width="314"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="可用性检查" FontSize="12" Foreground="{DynamicResource Accent}"/><TextBlock x:Name="CapabilitySummary" Grid.Column="1" Text="未验证" FontSize="11" Foreground="{DynamicResource Muted}"/></Grid></Button>
     </StackPanel>
     <Border Height="1" Background="{DynamicResource Line}"/>
     <Grid Margin="19,12,16,13"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

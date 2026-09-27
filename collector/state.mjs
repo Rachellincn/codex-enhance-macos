@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { classifyFailure } from './diagnostics.mjs';
-import { performanceView, turnProblemNotice } from './performance.mjs';
+import { performanceView, turnProblemNotice, firstOutputView } from './performance.mjs';
 
 const finite = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
 export function milliseconds(value) {
@@ -217,6 +217,11 @@ export class ThreadState {
       turn.model ||= data.model; turn.effort ||= data.effort;
       if (t.hasUserInput) turn.hasUserInput = true;
       if (t.hasReply) turn.hasReply = true;
+      turn.outputObserved = true;
+      if (t.hasModelActivity) turn.hasModelActivity = true;
+      const firstReply = finite(t.firstReplyStartedAtMs);
+      if (firstReply !== null && turn.startedAtMs != null && firstReply >= turn.startedAtMs && firstReply <= now)
+        turn.firstReplyStartedAtMs = Math.min(turn.firstReplyStartedAtMs ?? firstReply, firstReply);
       const status = String(t.status ?? '').toLowerCase();
       if (/inprogress|in_progress|active|running/.test(status) && !turn.completedAtMs) {
         const observedCompaction = turn.compactionHeartbeatAtMs && !turn.compactionCompletedAtMs && now - turn.compactionHeartbeatAtMs < 45000;
@@ -253,7 +258,7 @@ export class ThreadState {
     if (phase === 'working' && !runtimeConnected && now - this.lastActivityAt > 120000) phase = 'unknown';
     return { threadId: this.id, title: this.title, model: this.model, effort: this.effort, turnId: this.latestTurnId,
       phase, startedAtMs: turn?.startedAtMs, elapsedMs: turn?.durationMs ?? (turn?.startedAtMs ? Math.max(0, now - turn.startedAtMs) : null),
-      ttftMs: turn?.ttftMs ?? null, context: this.context, cacheHit: this.cacheHit, totalTokens: this.totalTokens,
+      ttftMs: turn?.ttftMs ?? null, firstOutput: firstOutputView(turn, now, runtimeConnected), context: this.context, cacheHit: this.cacheHit, totalTokens: this.totalTokens,
       compactions: this.compactions, lastCompaction: this.lastCompaction,
       performance: performanceView(this, current, now, runtimeConnected),
       tools: { running: running.filter(t => t.status === 'running').length, completed: current.filter(t => t.status === 'completed').length,

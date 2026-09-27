@@ -28,17 +28,17 @@ export class CdpSession {
     for (const request of this.pending.values()) { clearTimeout(request.timer); request.reject(new Error('CDP disconnected')); }
     this.pending.clear();
   }
-  request(method, params = {}) {
+  request(method, params = {}, timeoutMs = 2500) {
     if (this.closed) return Promise.reject(new Error('CDP disconnected'));
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('CDP request timeout')); }, 2500);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error('CDP request timeout')); }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       try { this.ws.send(JSON.stringify({ id, method, params })); } catch (e) { clearTimeout(timer); this.pending.delete(id); reject(e); }
     });
   }
-  async evaluate(expression) {
-    const r = await this.request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: false });
+  async evaluate(expression, timeoutMs = 2500) {
+    const r = await this.request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: false }, timeoutMs);
     if (r.exceptionDetails) throw new Error('Codex runtime layout is unavailable');
     return r.result?.value;
   }
@@ -77,8 +77,9 @@ export function selectCurrentThread(doc, route = '') {
   return { threadId: candidates.length === 1 ? candidates[0].threadId : null, ambiguous: candidates.length > 1 };
 }
 
-// Read only application-owned in-memory state. Never invoke sendRequest,
-// resume/start a turn, patch application functions, or alter user content.
+// Read only application-owned in-memory state. Never resume/start a turn,
+// patch application functions, or alter user content. The separate capability
+// monitor permits only listMcpServers, a read-only directory request.
 export function readRuntimeStore(threadId) {
   if (!threadId) return null;
   const cacheKey = '__codexEnhanceReadCache';
@@ -134,6 +135,14 @@ export function readRuntimeStore(threadId) {
   const byId = new Map();
   for (const t of turns) byId.set(t.turnId ?? t.id, t);
   const ordered = [...byId.values()].sort((a, b) => (a.turnStartedAtMs ?? a.startedAtMs ?? 0) - (b.turnStartedAtMs ?? b.startedAtMs ?? 0)).slice(-3);
+  const firstReplyStarted = turn => {
+    const start = turn.turnStartedAtMs ?? turn.startedAtMs;
+    if (!Number.isFinite(start)) return null;
+    const times = (turn.items ?? []).filter(i => i.type === 'agentMessage' && typeof i.text === 'string' && i.text.trim().length > 0)
+      .map(i => turn.aeonAssistantMessageStartedAtMsById?.[i.id])
+      .filter(time => Number.isFinite(time) && time >= start && time <= Date.now());
+    return times.length ? Math.min(...times) : null;
+  };
   const safeItem = (item, turn) => {
     if (!/mcpToolCall|commandExecution|webSearch|dynamicToolCall|fileChange|contextCompaction|collabToolCall|imageGeneration|imageView|sleep/.test(item.type ?? '')) return null;
     return { id: item.id, type: item.type, tool: item.tool, server: item.server, name: item.name,
@@ -148,6 +157,8 @@ export function readRuntimeStore(threadId) {
       progressSignature: (t.items ?? []).slice(-8).map(i => [i.id, i.type, i.status, typeof i.text === 'string' ? i.text.length : 0, typeof i.aggregatedOutput === 'string' ? i.aggregatedOutput.length : 0].join(':')).join('|'),
       hasUserInput: (t.items ?? []).some(i => i.type === 'userMessage'),
       hasReply: (t.items ?? []).some(i => i.type === 'agentMessage' && typeof i.text === 'string' && i.text.trim().length > 0),
+      firstReplyStartedAtMs: firstReplyStarted(t),
+      hasModelActivity: Number.isFinite(t.firstTurnWorkItemStartedAtMs) || (t.items ?? []).some(i => i.type === 'reasoning' && [...(Array.isArray(i.summary) ? i.summary : []), ...(Array.isArray(i.content) ? i.content : [])].some(part => typeof part === 'string' ? part.trim().length > 0 : typeof part?.text === 'string' && part.text.trim().length > 0)),
       startedAtMs: t.turnStartedAtMs ?? t.startedAtMs ?? t.startTime ?? t.firstTurnWorkItemStartedAtMs,
       completedAtMs: t.completedAtMs, items: (t.items ?? []).map(item => safeItem(item, t)).filter(Boolean) })) };
 }
@@ -186,12 +197,15 @@ export class DesktopLink {
   }
   async poll(lockedId) {
     if (Date.now() - this.lastDiscover > 5000) { this.lastDiscover = Date.now(); await this.discover(); }
-    const values = await Promise.allSettled([...this.sessions.values()].map(s => s.evaluate(runtimeExpression(lockedId))));
-    const usable = values.flatMap(r => r.status === 'fulfilled' && r.value ? [r.value] : []);
+    const sessions = [...this.sessions.values()];
+    const values = await Promise.allSettled(sessions.map(s => s.evaluate(runtimeExpression(lockedId))));
+    const usable = values.flatMap((r, index) => r.status === 'fulfilled' && r.value ? [{ ...r.value, session: sessions[index] }] : []);
     this.connected = usable.length > 0;
     const focused = usable.filter(r => r.documentFocused);
     const result = focused.length === 1 ? focused[0] : usable.length === 1 ? usable[0] : null;
-    return result ?? { threadId: null, ambiguous: usable.length > 1, runtime: null };
+    this.activeSession = result?.session ?? null;
+    if (result) { const { session, ...data } = result; return data; }
+    return { threadId: null, ambiguous: usable.length > 1, runtime: null };
   }
   close() { for (const s of this.sessions.values()) s.close(); this.sessions.clear(); }
 }

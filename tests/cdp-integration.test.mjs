@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DesktopLink } from '../collector/cdp.mjs';
 import { ThreadState } from '../collector/state.mjs';
+import { CapabilityMonitor } from '../collector/capabilities.mjs';
 
 test('CDP discovery, focus selection, live tools and completion work through a real protocol endpoint', async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-cdp-'));
@@ -22,4 +23,15 @@ test('CDP discovery, focus selection, live tools and completion work through a r
   child.send({ type: 'complete' }); await once(child, 'message');
   const second = await link.poll(null); state.runtime(second.runtime);
   assert.equal(state.snapshot(Date.now(), true).tools.running, 1); assert.equal(state.snapshot(Date.now(), true).tools.completed, 1);
+  let now = Date.now(); const health = new CapabilityMonitor({ now: () => now });
+  health.sample(link.activeSession, id, true); await Promise.all(health.pending.values());
+  assert.equal(health.sample(link.activeSession, id, true).watched.state, 'listed');
+  child.send({type:'remove-tool'}); await once(child, 'message'); now += 3000; health.refresh();
+  health.sample(link.activeSession, id, true); await Promise.all(health.pending.values());
+  const missing = health.sample(link.activeSession, id, true);
+  assert.equal(missing.watched.state, 'missing'); assert.deepEqual(missing.changes[0].removed, ['read_thread']);
+  child.send({type:'first-reply'}); const [reply] = await once(child,'message');
+  const liveReply = await link.poll(null); state.runtime(liveReply.runtime);
+  assert.deepEqual(state.snapshot(Date.now(),true).firstOutput,{state:'observed',ms:reply.expectedMs});
+  assert.equal(state.snapshot(Date.now(),true).ttftMs,null);
 });

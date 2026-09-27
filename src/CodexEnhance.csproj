@@ -3,7 +3,8 @@
     <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings><AssemblyName>CodexEnhance</AssemblyName>
-    <ApplicationManifest>app.manifest</ApplicationManifest><Version>0.1.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest><Version>0.2.0</Version>
+    <Product>Codex Enhance</Product><Description>Codex status monitor for Windows</Description>
   </PropertyGroup>
   <ItemGroup>
     <Content Include="../collector/**/*.mjs" Link="collector/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

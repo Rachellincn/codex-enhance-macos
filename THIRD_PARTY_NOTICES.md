@@ -11,4 +11,4 @@
 - **Microsoft Fluent UI System Icons**, MIT. SVG assets from https://github.com/microsoft/fluentui-system-icons are rendered as native WPF geometry without redesigning their shapes.
   License: `licenses/fluent-icons-MIT.txt`.
 - **Node.js**: packaged runtime is copied from the locally installed Node 24 runtime. See `licenses/node-LICENSE.txt` for its runtime and dependency licenses.
-- **.NET runtime**: self-contained publishing includes Microsoft .NET runtime components and their bundled notices.
+- **.NET runtime and Windows Desktop runtime**: self-contained publishing includes Microsoft .NET 10 runtime components. Their licenses and notices are included in `licenses/dotnet-runtime-LICENSE.txt`, `licenses/dotnet-runtime-THIRD-PARTY-NOTICES.txt` and `licenses/dotnet-desktop-LICENSE.txt`.

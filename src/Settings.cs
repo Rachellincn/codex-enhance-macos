@@ -14,6 +14,8 @@ public sealed class Settings
     public double? TopOffset { get; set; }
     public string Theme { get; set; } = "system";
     public string? NodePath { get; set; }
+    public bool QuotaIncludeAstraLongContext { get; set; } = false;
+    public bool QuotaNormalizeFast { get; set; } = true;
     public static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true, PropertyNameCaseInsensitive = true };
     public static Settings Load()
     {

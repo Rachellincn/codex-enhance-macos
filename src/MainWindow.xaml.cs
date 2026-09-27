@@ -55,6 +55,7 @@ public partial class MainWindow : Window
         if (preview && !renderMode) { ShowInTaskbar = true; ShowActivated = true; }
         CollapseButton.Content = Icons.Create("chevron-up");
         MenuButton.Content = Icons.Create("more", 18);
+        QuotaIcon.Content = Icons.Create("data-usage", 17, "Text"); QuotaChevron.Content = Icons.Create("chevron-right", 16);
         PillChevron.Content = Icons.Create("chevron-down", 15); ToolsIcon.Content = Icons.Create("wrench", 17, "Text");
         ToolsChevron.Content = Icons.Create("chevron-right", 16); HistoryArrow.Content = Icons.Create("arrow-right", 16, "Accent");
         ModelIcon.Content = Icons.Create("sparkle", 16); FollowIcon.Content = Icons.Create("link", 16);
@@ -88,6 +89,16 @@ public partial class MainWindow : Window
             Title = "Codex 状态浮窗 · 界面预览";
             ConnectionText.Text = "界面预览 · 示例数据，未接入实时采集";
             ConnectionNotice.Visibility = Visibility.Visible;
+            if (Arg("--capabilities") is { } capabilityPath)
+            {
+                snapshot["toolHealth"] = JsonNode.Parse(File.ReadAllText(capabilityPath));
+                ApplySnapshot(snapshot); OpenCapabilities(this, new RoutedEventArgs());
+            }
+            if (Arg("--quota") is { } quotaPath)
+            {
+                snapshot["quota"] = JsonNode.Parse(File.ReadAllText(quotaPath));
+                ApplySnapshot(snapshot); OpenQuota(this, new RoutedEventArgs());
+            }
             if (args.Contains("--picker"))
             {
                 var threads = new JsonArray();
@@ -115,6 +126,7 @@ public partial class MainWindow : Window
         try
         {
             collector.Start(settings, Arg("--thread") ?? settings.LockedThreadId ?? settings.ManualThreadId);
+            SendQuotaOptions();
             if (settings.LockedThreadId is not null) Send("lock", settings.LockedThreadId);
             else if (!settings.FollowMode && settings.ManualThreadId is not null) Send("select", settings.ManualThreadId);
         }
@@ -144,7 +156,7 @@ public partial class MainWindow : Window
         snapshot = data;
         if (B(data["connection"]?["selectionReset"]))
         { settings.LockedThreadId = null; settings.ManualThreadId = null; settings.FollowMode = true; Save(); }
-        var issues = (data["tools"]?["issues"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? Array.Empty<JsonObject>();
+        var issues = ActiveIssues();
         if (!B(data["historyLoading"])) disclosure.Observe(issues.Where(i => S(i["severity"]) == "critical").Select(i => S(i["id"]) + ":critical"), DateTimeOffset.UtcNow);
         TaskTitle.Text = S(data["title"], "选择一个任务"); TaskTitle.ToolTip = TaskTitle.Text;
         PhaseText.Text = S(data["phase"]) switch { "working" => "正在处理", "compacting" => "正在压缩", "idle" => "已完成", "interrupted" => "已中断", "failed" => "本轮未完成", "waiting" => "等待输入", _ => currentThread is null ? "等待任务" : "状态待确认" };
@@ -152,11 +164,6 @@ public partial class MainWindow : Window
         var active = S(data["phase"]) is "working" or "compacting";
         PhaseDot.Fill = BrushFor(active ? "Accent" : "Faint");
         ContextText.Text = Percent(N(data["context"]?["percent"])); CacheText.Text = Percent(N(data["cacheHit"]));
-        var currentTtft = N(data["ttftMs"]);
-        var shownTtft = currentTtft ?? N(data["performance"]?["recentTtftMs"]);
-        FirstTokenText.Text = Duration(shownTtft);
-        FirstTokenSource.Text = currentTtft is not null ? "本轮记录" : shownTtft is not null ? "最近记录" : "暂无记录";
-        FirstTokenText.ToolTip = currentTtft is not null ? "本轮日志中的 time_to_first_token_ms，不等同屏幕实际绘制首字的时间。" : "本轮尚未写出首 token 数据，暂显示最近有记录的完成轮次；不是本轮计时。";
         ContextFill.Width = 85 * Math.Clamp(N(data["context"]?["percent"]) ?? 0, 0, 100) / 100;
         ContextText.ToolTip = "最近一次上下文采样，不是累计 token 消耗";
         CacheText.ToolTip = "最近一次请求的缓存输入占比";
@@ -171,10 +178,15 @@ public partial class MainWindow : Window
         var realtime = B(data["tools"]?["runtimeAvailable"]);
         var level = S(data["tools"]?["highestSeverity"], attention > 0 ? "warning" : notes > 0 ? "info" : "");
         var highestCount = (int)(N(data["tools"]?["levelCounts"]?[level]) ?? attention);
-        var criticalCount = level == "critical" ? highestCount : 0;
+        var criticalCount = (level == "critical" ? highestCount : 0) + ((data["toolHealth"]?["issues"] as JsonArray)?.Count ?? 0);
         var records = (snapshot["tools"]?["items"] as JsonArray)?.OfType<JsonObject>().Count(t => S(t["turnId"]) == S(snapshot["turnId"])) ?? completed;
         ToolsSummary.Text = criticalCount > 0 ? $"Critical · {criticalCount}" : realtime && running > 0 ? $"{running} 项进行中" : records > 0 ? $"本轮 · {records} 项" : active ? "等待调用记录" : "本轮暂无调用";
+        if (criticalCount == 0 && S(data["toolHealth"]?["state"]) == "ready" &&
+            (S(data["toolHealth"]?["watched"]?["state"]) is "missing" or "server_absent" || (data["toolHealth"]?["changes"] as JsonArray)?.Count > 0))
+            ToolsSummary.Text = $"目录变化 · {records} 项调用";
         ToolsSummary.Foreground = BrushFor(criticalCount > 0 ? "Critical" : "Muted");
+        CapabilitySummary.Text = CapabilityLabel();
+        UpdateQuotaSummary();
         ToolsButton.ToolTip = attention + notes > 0 ? $"有 {attention + notes} 条分级记录，点击查看。只有 Critical 主动展开。" : realtime ? "当前回合的工具调用，点击查看详情" : "已完成调用来自本地记录；实时调用状态尚未接通";
         var connection = data["connection"];
         var selection = S(connection?["selection"]);
@@ -187,7 +199,7 @@ public partial class MainWindow : Window
         if (B(data["historyLoading"])) message = "正在读取这个任务的历史记录…";
         ConnectionText.Text = message;
         ConnectionNotice.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
-        string newKey = (data["tools"]?["issues"]?.ToJsonString() ?? "") + disclosure.ToolsExpanded + (disclosure.ToolsExpanded ? data["tools"]?["items"]?.ToJsonString() : "");
+        string newKey = (data["tools"]?["issues"]?.ToJsonString() ?? "") + (data["toolHealth"]?["issues"]?.ToJsonString() ?? "") + disclosure.ToolsExpanded + (disclosure.ToolsExpanded ? data["tools"]?["items"]?.ToJsonString() : "");
         if (newKey != issuesKey) { issuesKey = newKey; PopulateTools(); }
         UpdateDisclosure(); UpdateTime();
         PillPhase.Text = criticalCount > 0 ? ToolsSummary.Text : PhaseText.Text;
@@ -210,6 +222,38 @@ public partial class MainWindow : Window
             elapsed += Math.Min(6000, Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (N(snapshot["updatedAtMs"]) ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())));
         ElapsedText.Text = elapsed is null ? "—" : Clock(elapsed.Value);
         PillMetric.Text = ElapsedText.Text;
+        UpdateFirstToken();
+    }
+    private void UpdateFirstToken()
+    {
+        var first = snapshot["firstOutput"]; var kind = S(first?["state"]);
+        bool active = S(snapshot["phase"]) is "working" or "compacting" or "waiting";
+        string label = "首字", value = "—", source = "本轮暂无记录", tip = "本轮首字时点未取得，不使用上轮数据代替正在运行的这一轮。";
+        if (N(snapshot["ttftMs"]) is { } exact)
+        { label = "首字（日志）"; value = Duration(exact); source = "本轮记录"; tip = "本轮日志中的 time_to_first_token_ms，不等同屏幕实际绘制时间。"; }
+        else if (kind == "observed" && N(first?["ms"]) is { } observed)
+        { label = "首字（观测）"; value = "≈" + Duration(observed); source = "本轮首条回复"; tip = "从本轮开始到客户端首条助手消息的启动时间，属于首条回复观测值，不等同日志首 token 耗时；日志到达后会切换口径。"; }
+        else if (active)
+        {
+            source = "本轮状态";
+            switch (kind)
+            {
+                case "output_seen": value = "已输出"; source = "时点未记录"; break;
+                case "activity_seen": value = "已响应"; source = "首字待记录"; break;
+                case "waiting_input": value = "待输入"; source = "等待确认/输入"; break;
+                case "compacting": value = "压缩中"; break;
+                case "waiting":
+                    double age = preview ? 0 : Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - (N(snapshot["updatedAtMs"]) ?? 0));
+                    if (!collectorFailed && age < 6000)
+                    { value = "等 " + Duration((N(first?["ms"]) ?? 0) + age); source = "本轮等待中"; tip = "这是本轮目前已等待的时间，尚不是测得的首 token 耗时。观察到响应后停止等待显示。"; }
+                    else source = "等待数据更新";
+                    break;
+            }
+        }
+        else if (N(snapshot["performance"]?["recentTtftMs"]) is { } recent)
+        { label = "首字（日志）"; value = Duration(recent); source = "最近记录"; tip = "本轮没有首 token 日志；这里是最近有记录的完成轮次。"; }
+        FirstTokenLabel.Text = label; FirstTokenText.Text = value; FirstTokenSource.Text = source;
+        FirstTokenText.FontSize = value.Length > 6 ? 16 : 20; FirstTokenText.ToolTip = tip;
     }
     private static string Percent(double? value) => value is null ? "—" : value.Value.ToString("0.0") + "%";
     private static string Clock(double ms) { var span = TimeSpan.FromMilliseconds(Math.Max(0, ms)); return span.TotalHours >= 1 ? $"{(int)span.TotalHours}:{span.Minutes:00}:{span.Seconds:00}" : $"{(int)span.TotalMinutes:00}:{span.Seconds:00}"; }
@@ -226,7 +270,7 @@ public partial class MainWindow : Window
     private void PopulateTools()
     {
         IssueList.Children.Clear();
-        var issues = (snapshot["tools"]?["issues"] as JsonArray)?.OfType<JsonObject>().ToArray() ?? Array.Empty<JsonObject>();
+        var issues = ActiveIssues();
         if (issues.Length > 0) foreach (var group in issues.GroupBy(i => S(i["severity"]) + "|" + S(i["label"]) + "|" + S(i["reason"])).Take(6))
         {
             var issue = group.First().DeepClone().AsObject();
@@ -332,7 +376,7 @@ public partial class MainWindow : Window
         if (show && !IsVisible) Show(); else if (!show && IsVisible) Hide();
         if (show && !dragging) PositionNearHost();
         UpdateTime(); UpdateFreshness(); refreshDetail?.Invoke();
-        if (!B(snapshot["historyLoading"])) disclosure.Observe(((snapshot["tools"]?["issues"] as JsonArray)?.OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>()).Where(i => S(i["severity"]) == "critical").Select(i => S(i["id"]) + ":critical"), DateTimeOffset.UtcNow);
+        if (!B(snapshot["historyLoading"])) disclosure.Observe(ActiveIssues().Where(i => S(i["severity"]) == "critical").Select(i => S(i["id"]) + ":critical"), DateTimeOffset.UtcNow);
         UpdateDisclosure();
         if (DateTimeOffset.UtcNow - lastWindowDiagnostic > TimeSpan.FromSeconds(3))
         {
@@ -418,6 +462,8 @@ public partial class MainWindow : Window
         Add("选择监视任务", () => OpenTaskPicker(this, new RoutedEventArgs()));
         Add("连接与诊断", () => OpenHealth(this, new RoutedEventArgs()));
         Add("查看调用记录", () => OpenHistory(this, new RoutedEventArgs()));
+        Add("工具可用性检查", () => OpenCapabilities(this, new RoutedEventArgs()));
+        Add("账号额度与等效金额", () => OpenQuota(this, new RoutedEventArgs()));
         Add("性能与压缩详情", () => OpenMetrics(this, new RoutedEventArgs()));
         Add("恢复默认位置", () => { settings.RightOffset = 22; settings.TopOffset = null; Save(); PositionNearHost(); });
         menu.Items.Add(new Separator());
@@ -449,6 +495,33 @@ public partial class MainWindow : Window
         ApplySnapshot(Demo(true, "error")); bool errorQuiet = !disclosure.Expanded;
         ApplySnapshot(Demo(true, "critical")); bool criticalOpens = disclosure.Expanded && disclosure.ToolsExpanded;
         File.WriteAllText(Path.Combine(output, "critical-only-check.json"), System.Text.Json.JsonSerializer.Serialize(new { warningQuiet, errorQuiet, criticalOpens, passed = warningQuiet && errorQuiet && criticalOpens }, Settings.JsonOptions));
+        var missingDirectory = Demo(false);
+        missingDirectory["toolHealth"] = JsonNode.Parse("""{"state":"ready","watched":{"state":"missing"},"issues":[],"servers":[]}""");
+        disclosure = new Disclosure(false); ApplySnapshot(missingDirectory); bool directoryMissingQuiet = !disclosure.Expanded;
+        var failedService = Demo(false);
+        failedService["toolHealth"] = JsonNode.Parse("""{"state":"ready","watched":{"state":"unverified"},"issues":[{"id":"service-failure","severity":"critical","label":"工具服务","name":"codex_app","reason":"服务状态失败","detail":"当前服务状态为 failed"}],"servers":[]}""");
+        disclosure = new Disclosure(false); ApplySnapshot(failedService); bool serviceFailureOpens = disclosure.Expanded && disclosure.ToolsExpanded && ToolsSummary.Text.Contains("Critical");
+        File.WriteAllText(Path.Combine(output, "capability-disclosure-check.json"), System.Text.Json.JsonSerializer.Serialize(new { directoryMissingQuiet, serviceFailureOpens, passed = directoryMissingQuiet && serviceFailureOpens }, Settings.JsonOptions));
+        var waitingOutput = Demo(false); waitingOutput["ttftMs"] = null; waitingOutput["elapsedMs"] = 4200;
+        waitingOutput["tools"]!["running"] = 0; waitingOutput["performance"]!["stage"] = "正在处理";
+        waitingOutput["performance"]!["recentTtftMs"] = 98765;
+        waitingOutput["firstOutput"] = new JsonObject { ["state"] = "waiting", ["ms"] = 4200 };
+        disclosure = new Disclosure(true); ApplySnapshot(waitingOutput); bool waitingIsLive = FirstTokenText.Text == "等 4.2 s" && FirstTokenSource.Text == "本轮等待中";
+        Capture(Path.Combine(output, "first-output-waiting.png"));
+        waitingOutput["firstOutput"] = new JsonObject { ["state"] = "observed", ["ms"] = 2300 };
+        ApplySnapshot(waitingOutput); bool observedCurrent = FirstTokenText.Text == "≈2.3 s" && FirstTokenLabel.Text == "首字（观测）";
+        Capture(Path.Combine(output, "first-output-observed.png"));
+        waitingOutput["firstOutput"] = new JsonObject { ["state"] = "output_seen" };
+        ApplySnapshot(waitingOutput); bool noInventedDuration = FirstTokenText.Text == "已输出";
+        waitingOutput["ttftMs"] = 1200; ApplySnapshot(waitingOutput); bool logWins = FirstTokenText.Text == "1.2 s" && FirstTokenLabel.Text == "首字（日志）";
+        File.WriteAllText(Path.Combine(output, "first-output-check.json"), System.Text.Json.JsonSerializer.Serialize(new { waitingIsLive, observedCurrent, noInventedDuration, logWins, passed = waitingIsLive && observedCurrent && noInventedDuration && logWins }, Settings.JsonOptions));
+        var quotaDemo = Demo(false); quotaDemo["quota"] = JsonNode.Parse("""{"state":"ready","plan":"pro","windows":[{"minutes":10080,"remainingPercent":93}]}""");
+        ApplySnapshot(quotaDemo); bool proWeeklyOnly = QuotaSummary.Text == "周剩余 93%";
+        Capture(Path.Combine(output, "quota-pro-main.png"));
+        quotaDemo["quota"]!["plan"] = "plus"; quotaDemo["quota"]!["windows"]!.AsArray().Add(new JsonObject { ["minutes"] = 300, ["remainingPercent"] = 20 });
+        ApplySnapshot(quotaDemo); bool plusBoth = QuotaSummary.Text == "5h余 20% · 周余 93%";
+        Capture(Path.Combine(output, "quota-plus-main.png"));
+        File.WriteAllText(Path.Combine(output, "quota-display-check.json"), System.Text.Json.JsonSerializer.Serialize(new { proWeeklyOnly, plusBoth, passed = proWeeklyOnly && plusBoth }, Settings.JsonOptions));
         disclosure = new Disclosure(true); ApplySnapshot(Demo(false)); Capture(Path.Combine(output, "normal.png"));
         ApplySnapshot(Demo(true)); Capture(Path.Combine(output, "attention.png"));
         disclosure = new Disclosure(true); ApplySnapshot(Demo(true, "error")); Capture(Path.Combine(output, "error.png"));
@@ -463,6 +536,7 @@ public partial class MainWindow : Window
         FollowButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         bool following = FollowText.Text == "跟随对话" && S(snapshot["connection"]?["selection"]) == "auto";
         File.WriteAllText(Path.Combine(output, "follow-control-check.json"), System.Text.Json.JsonSerializer.Serialize(new { fixedConversation, following, passed = fixedConversation && following }, Settings.JsonOptions));
+        RenderGallery(Path.Combine(output, "screenshots"));
         Close();
     }
     private void Capture(string file)

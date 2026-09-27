@@ -3,9 +3,10 @@
 import fs from 'node:fs';
 
 export class JsonlTail {
-  constructor(file, onRecord) {
+  constructor(file, onRecord, onMalformed = null) {
     this.file = file;
     this.onRecord = onRecord;
+    this.onMalformed = onMalformed;
     this.offset = 0;
     this.pending = Buffer.alloc(0);
     this.identity = null;
@@ -39,7 +40,7 @@ export class JsonlTail {
           const prefix = line.subarray(0, 220).toString('utf8');
           if (!/"type"\s*:\s*"(?:event_msg|turn_context|session_meta|compacted|token_usage_record)"/.test(prefix)) continue;
           try { this.onRecord(JSON.parse(line.toString('utf8'))); }
-          catch (e) { if (e instanceof SyntaxError) this.malformed++; else throw e; }
+          catch (e) { if (e instanceof SyntaxError) { this.malformed++; this.onMalformed?.(prefix); } else throw e; }
         }
         this.pending = Buffer.from(data.subarray(start));
         if (this.pending.length > 32 * 1024 * 1024) {

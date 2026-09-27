@@ -4,6 +4,8 @@ import os from 'node:os';
 import readline from 'node:readline';
 import { Catalog } from './catalog.mjs';
 import { DesktopLink } from './cdp.mjs';
+import { CapabilityMonitor } from './capabilities.mjs';
+import { WeeklyQuota } from './quota.mjs';
 
 const args = process.argv.slice(2);
 const value = (flag, fallback) => args.includes(flag) ? args[args.indexOf(flag) + 1] : fallback;
@@ -11,6 +13,8 @@ const home = value('--home', process.env.CODEX_HOME ?? path.join(os.homedir(), '
 const stateDir = value('--state-dir', path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'CodexEnhance'));
 const seed = value('--thread', null);
 const catalog = new Catalog(home), desktop = new DesktopLink(stateDir);
+const capabilities = new CapabilityMonitor();
+const weekly = new WeeklyQuota(home, stateDir);
 let manualId = seed, lockedId = null, follow = true, lastId = null, stopping = false;
 const write = data => { if (!process.stdout.destroyed) process.stdout.write(`${JSON.stringify(data)}\n`); };
 const rl = readline.createInterface({ input: process.stdin });
@@ -22,6 +26,9 @@ rl.on('line', line => {
     if (command.type === 'lock') { lockedId = command.threadId || lastId; }
     if (command.type === 'unlock') { lockedId = null; follow = true; manualId = null; }
     if (command.type === 'stop') stopping = true;
+    if (command.type === 'checkTools') capabilities.refresh(command.threadId ?? lastId);
+    if (command.type === 'refreshQuota') weekly.refresh();
+    if (command.type === 'quotaOptions') weekly.setOptions(command.options);
   } catch {}
 });
 rl.on('close', () => { stopping = true; });
@@ -37,6 +44,8 @@ while (!stopping) {
     const current = await desktop.poll(lockedId ?? (!follow ? manualId : null));
     const id = lockedId ?? (!follow ? manualId : current.threadId ?? (!desktop.connected ? manualId : null));
     const selection = lockedId ? 'locked' : !follow || (!desktop.connected && manualId) ? 'manual' : id ? 'auto' : 'none';
+    const toolHealth = capabilities.sample(desktop.activeSession, id, Boolean(current.runtime));
+    const quota = weekly.sample(desktop.activeSession);
     const connection = { cdp: desktop.connected ? 'connected' : 'waiting', runtime: Boolean(current.runtime), selection, selectionReset,
       message: !desktop.connected ? '下次正常启动 Codex 后启用自动跟随' : current.ambiguous ? '多个会话可见，请点击要跟随的输入区' : !id ? '当前页面没有可识别的本地任务' : '' };
     const recentThreads = catalog.recent();
@@ -46,11 +55,11 @@ while (!stopping) {
         if (current.runtime && (lockedId || id === current.threadId || !follow)) data.state.runtime(current.runtime);
         const snapshot = data.state.snapshot(Date.now(), desktop.connected && Boolean(current.runtime));
         lastId = id;
-        write({ schemaVersion: 1, ...snapshot, connection, recentThreads, historyLoading: !data.caughtUp, readErrors: data.errors });
-      } else write({ schemaVersion: 1, threadId: id, phase: 'unknown', connection: { ...connection, message: '未找到这个任务的本地记录' }, recentThreads, updatedAtMs: Date.now() });
-    } else write({ schemaVersion: 1, phase: 'unknown', connection, recentThreads, updatedAtMs: Date.now() });
+        write({ schemaVersion: 1, ...snapshot, connection, toolHealth, quota, recentThreads, historyLoading: !data.caughtUp, readErrors: data.errors });
+      } else write({ schemaVersion: 1, threadId: id, phase: 'unknown', connection: { ...connection, message: '未找到这个任务的本地记录' }, quota, recentThreads, updatedAtMs: Date.now() });
+    } else write({ schemaVersion: 1, phase: 'unknown', connection, quota, recentThreads, updatedAtMs: Date.now() });
   } catch (e) { write({ schemaVersion: 1, phase: 'unknown', error: String(e.message).slice(0, 180), connection: { cdp: 'waiting', selection: 'none', message: '采集暂不可用，正在重连' }, updatedAtMs: Date.now() }); }
   if (args.includes('--once')) break;
   await new Promise(r => setTimeout(r, Math.max(100, 900 - (Date.now() - start))));
 }
-desktop.close(); catalog.close(); rl.close();
+desktop.close(); catalog.close(); rl.close(); await weekly.close();

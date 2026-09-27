@@ -1,3 +1,17 @@
+export function firstOutputView(turn, now, runtimeConnected) {
+  if (!turn) return { state: 'unknown' };
+  if (Number.isFinite(turn.ttftMs) && turn.ttftMs >= 0) return { state: 'logged', ms: turn.ttftMs };
+  if (Number.isFinite(turn.firstReplyStartedAtMs) && Number.isFinite(turn.startedAtMs))
+    return { state: 'observed', ms: Math.max(0, turn.firstReplyStartedAtMs - turn.startedAtMs) };
+  if (turn.hasReply) return { state: 'output_seen' };
+  if (turn.hasModelActivity) return { state: 'activity_seen' };
+  if (!runtimeConnected || !turn.outputObserved) return { state: 'unknown' };
+  if (turn.phase === 'waiting') return { state: 'waiting_input' };
+  if (turn.phase === 'compacting') return { state: 'compacting' };
+  if (turn.phase === 'working' && Number.isFinite(turn.startedAtMs)) return { state: 'waiting', ms: Math.max(0, now - turn.startedAtMs) };
+  return { state: 'unknown' };
+}
+
 export function turnProblemNotice(error) {
   const value = typeof error === 'string' ? error : JSON.stringify(error ?? {});
   if (/usage.?limit|rate.?limit|too_many_requests|\b429\b|quota|额度|限流/i.test(value)) return '本轮曾收到额度或限流提示，等待不能直接归因于模型计算。';

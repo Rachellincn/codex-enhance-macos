@@ -48,6 +48,7 @@ public partial class MainWindow
         var phase = MetricRow(stack, "当前阶段"); var elapsed = MetricRow(stack, "本轮耗时");
         var progress = MetricRow(stack, "距可见进度变化"); var log = MetricRow(stack, "距最新日志");
         Section(stack, "首字与近期表现");
+        var liveOutput = MetricRow(stack, "本轮输出观测");
         var ttft = MetricRow(stack, "首字 · 本轮日志"); var baseline = MetricRow(stack, "同模型 / 强度中位数");
         var trend = new Grid { Height = 80, Margin = new Thickness(0, 10, 0, 0) }; stack.Children.Add(trend);
         var trendNote = Text("", "Faint", 11); trendNote.Margin = new Thickness(0, 7, 0, 0); stack.Children.Add(trendNote);
@@ -65,6 +66,7 @@ public partial class MainWindow
             var p = snapshot["performance"];
             phase(PhaseText.Text); elapsed(ElapsedText.Text); progress(Duration(N(p?["progressGapMs"]))); log(Duration(N(p?["logGapMs"])));
             ttft(Duration(N(snapshot["ttftMs"]))); baseline($"{Duration(N(p?["baselineMs"]))} · {N(p?["baselineSamples"]) ?? 0} 轮");
+            liveOutput(S(snapshot["firstOutput"]?["state"]) == "observed" ? "≈" + Duration(N(snapshot["firstOutput"]?["ms"])) + " · 首条回复" : FirstTokenText.Text);
             context($"{N(snapshot["context"]?["used"])?.ToString("N0") ?? "—"} / {N(snapshot["context"]?["limit"])?.ToString("N0") ?? "—"}");
             sampled(LocalTime(N(snapshot["context"]?["sampledAtMs"]))); cache(CacheText.Text); total(N(snapshot["totalTokens"])?.ToString("N0") ?? "—");
             compact($"{N(snapshot["compactions"]) ?? 0} / {Duration(N(snapshot["lastCompaction"]?["durationMs"]))}");

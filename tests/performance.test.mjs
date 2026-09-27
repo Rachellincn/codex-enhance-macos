@@ -1,8 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ThreadState } from '../collector/state.mjs';
-import { turnProblemNotice } from '../collector/performance.mjs';
+import { turnProblemNotice, firstOutputView } from '../collector/performance.mjs';
 const epoch = Date.parse('2026-09-26T10:00:00Z');
+test('active first output waits live, then uses client observation without rewriting logged TTFT', () => {
+  const s = new ThreadState('task');
+  s.runtime({turns:[{id:'live',status:'inProgress',startedAtMs:epoch,hasReply:false,items:[]}]}, epoch+1000);
+  assert.deepEqual(s.snapshot(epoch+2000,true).firstOutput,{state:'waiting',ms:2000});
+  s.runtime({turns:[{id:'live',status:'inProgress',startedAtMs:epoch,hasReply:true,firstReplyStartedAtMs:epoch+2300,items:[]}]}, epoch+3000);
+  const live=s.snapshot(epoch+4000,true); assert.deepEqual(live.firstOutput,{state:'observed',ms:2300}); assert.equal(live.ttftMs,null);
+  s.record({timestamp:new Date(epoch+8000).toISOString(),type:'event_msg',payload:{type:'task_complete',turn_id:'live',time_to_first_token_ms:1200,duration_ms:8000}});
+  assert.deepEqual(s.snapshot(epoch+9000,true).firstOutput,{state:'logged',ms:1200});
+});
+test('late attachment, model activity and disconnection never invent a first-token duration', () => {
+  const base={phase:'working',startedAtMs:epoch,outputObserved:true};
+  assert.equal(firstOutputView({...base,hasReply:true},epoch+50000,true).state,'output_seen');
+  assert.equal(firstOutputView({...base,hasModelActivity:true},epoch+50000,true).state,'activity_seen');
+  assert.equal(firstOutputView(base,epoch+50000,false).state,'unknown');
+  assert.equal(firstOutputView({...base,phase:'waiting'},epoch+50000,true).state,'waiting_input');
+  assert.equal(firstOutputView({...base,phase:'compacting'},epoch+50000,true).state,'compacting');
+});
 test('explicit quota and network signals are distinguished from ordinary slowness', () => {
   assert.match(turnProblemNotice({ codex_error_info: 'usage_limit_exceeded' }), /限流/);
   assert.match(turnProblemNotice('stream disconnected, retrying'), /网络等待/);

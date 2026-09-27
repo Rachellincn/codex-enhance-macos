@@ -9,11 +9,22 @@ globalThis.document = { activeElement: active, body: {}, querySelectorAll: selec
 globalThis.location = { href: `app://-/index.html#/thread/${id}` };
 const turn = { turnId: 'cdp-turn', status: 'inProgress', turnStartedAtMs: Date.now(), items: [{ id: 'live-a', type: 'mcpToolCall', tool: 'web.search', status: 'inProgress' }, { id: 'live-b', type: 'commandExecution', status: 'inProgress' }] };
 const store = { conversations: new Map([[id, { title: '协议验证任务', latestModel: 'gpt-6-astra', turns: [], turnHistory: { kind: 'canonical', history: { entitiesByKey: { 'tail:live': turn } } } }]]), updateConversationState() {} };
+let directoryTools = { read_thread: { name: 'read_thread' } };
+store.listMcpServers = async params => {
+  if (params.threadId !== id || params.detail !== 'toolsAndAuthOnly') throw new Error('unexpected capability request');
+  return { data: [{ name: 'codex_app', runtimeStatus: 'connected', tools: directoryTools, toolsError: null, authStatus: 'unsupported' }], nextCursor: null };
+};
 globalThis.__codexRoot = { _internalRoot: { current: { memoizedState: { memoizedState: store, next: null } } } };
 inspector.open(0, '127.0.0.1');
 const server = http.createServer((req, res) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify([{ id: 'isolated-fixture', type: 'page', url: 'app://-/index.html', webSocketDebuggerUrl: inspector.url() }])); });
 server.listen(0, '127.0.0.1', () => process.send?.({ port: server.address().port, id }));
 process.on('message', message => {
   if (message.type === 'complete') { turn.items[0].status = 'completed'; process.send?.({ type: 'completed' }); }
+  if (message.type === 'remove-tool') { directoryTools = {}; process.send?.({ type: 'removed' }); }
+  if (message.type === 'first-reply') {
+    const atMs = Date.now(); turn.items.push({ id: 'reply', type: 'agentMessage', text: 'Fixture output' });
+    turn.aeonAssistantMessageStartedAtMsById = { reply: atMs };
+    process.send?.({ type: 'replied', expectedMs: atMs - turn.turnStartedAtMs });
+  }
   if (message.type === 'stop') { server.close(); inspector.close(); process.exit(0); }
 });

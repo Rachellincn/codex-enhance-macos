@@ -26,6 +26,25 @@ public static class Verification
         var settings = new Settings { Expanded = true, ManualThreadId = "test", TopOffset = 155.5, RightOffset = 18, FollowMode = false };
         var restored = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(settings, Settings.JsonOptions), Settings.JsonOptions)!;
         Check(restored.Expanded && restored.TopOffset == 155.5 && restored.ManualThreadId == "test" && !restored.FollowMode, "settings round trip preserves selection and geometry");
+        var oldSettings = JsonSerializer.Deserialize<Settings>("{}", Settings.JsonOptions)!;
+        Check(!oldSettings.QuotaIncludeAstraLongContext && oldSettings.QuotaNormalizeFast, "quota migration defaults Astra off and Fast on");
+        settings.QuotaIncludeAstraLongContext = true; settings.QuotaNormalizeFast = false;
+        restored = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(settings, Settings.JsonOptions), Settings.JsonOptions)!;
+        Check(restored.QuotaIncludeAstraLongContext && !restored.QuotaNormalizeFast, "quota switches survive settings round trip");
+        var previousStateDirectory = Environment.GetEnvironmentVariable("CODEX_ENHANCE_STATE_DIR");
+        try {
+            Environment.SetEnvironmentVariable("CODEX_ENHANCE_STATE_DIR", Path.Combine(Path.GetDirectoryName(Path.GetFullPath(output))!, "verification-settings"));
+            settings.Save(); var diskSettings = Settings.Load();
+            Check(diskSettings.QuotaIncludeAstraLongContext && !diskSettings.QuotaNormalizeFast && diskSettings.TopOffset==155.5, "quota switches persist on disk without changing other preferences");
+        } finally { Environment.SetEnvironmentVariable("CODEX_ENHANCE_STATE_DIR", previousStateDirectory); }
+        var quota = JsonNode.Parse("""{"usedPercent":10,"quotaBaseUsd":0.53,"astraPremiumUsd":0.505,"quotaFastPremiumUsd":0.795,"astraFastPremiumUsd":0.7575,"estimateReasons":[]}""")!;
+        foreach (var (astra, fast, expected) in new[] { (false,false,.53), (true,false,1.035), (false,true,1.325), (true,true,2.5875) }) {
+            var f = MainWindow.QuotaFigures(quota,astra,fast,false);
+            Check(Math.Abs(f.Used!.Value-expected)<1e-9 && Math.Abs(f.Total!.Value-expected*10)<1e-9 && Math.Abs(f.Remaining!.Value-expected*9)<1e-9, $"quota UI arithmetic Astra={astra} Fast={fast}");
+        }
+        Check(MainWindow.QuotaFigures(quota,false,true,true).Total is null, "quota UI withholds partial indexing projection");
+        quota["estimateReasons"] = new JsonArray("parse_errors");
+        Check(MainWindow.QuotaFigures(quota,false,true,false).Total is null, "quota UI withholds incomplete current-window projection");
         var secret = JsonNode.Parse("""{"title":"PRIVATE","threadId":"PRIVATE","context":{"used":100,"path":"PRIVATE"},"tools":{"items":[{"name":"PRIVATE","command":"PRIVATE","detail":"PRIVATE","severity":"error","exitCode":1,"durationMs":12}]},"connection":{"cdp":"connected","runtime":true,"message":"PRIVATE"}}""")!.AsObject();
         string report = DiagnosticReport.Create(secret).ToJsonString();
         Check(!report.Contains("PRIVATE") && report.Contains("exitCode") && report.Contains("100"), "diagnostic export contains allowed metrics without private snapshot fields");

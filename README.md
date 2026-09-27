@@ -1,97 +1,97 @@
-# Codex Enhance · Codex 状态浮窗
+# Codex Enhance
 
-面向 Windows Codex 桌面客户端的原生 WPF 状态监测浮窗，用于观察 Codex 的运行状态、查看性能指标，并为异常排查提供线索。作为 Codex 的附属窗口显示，随 Codex 遮挡、移动和最小化，切换其他应用不主动隐藏或改变展开状态；支持收起、拖动、固定观察任务和系统深浅色。这是独立的社区项目。
+**看清 Codex 正在做什么，以及哪里需要排查。**
 
-工具调用统一为一个分组：日常记录保持收起，**仅 Critical 自动展开**；手动收起后同一提示不反复顶开。显示上下文最近采样、最近请求缓存命中、本轮计时，并可打开性能详情及调用记录。
+Windows 原生状态浮窗，把任务进度、上下文、工具状态和账号额度放在手边。随 Codex 窗口移动、遮挡与最小化，支持深浅色、收起和固定观察任务。
 
-## 为什么做这个工具
+[**下载 Windows 用户版**](https://github.com/hrx114514x/codex-enhance/releases/latest) · [开始使用](#三步开始使用) · [更新记录](CHANGELOG.md) · [反馈问题](https://github.com/hrx114514x/codex-enhance/issues)
 
-做这个工具的直接原因，是日常使用 Codex 时遇到了不少 bug 和状态不透明的问题：有时长时间没有可见进度，有时工具调用返回异常，有时任务结束却缺少可见回复。只看聊天界面，很难判断它正在执行工具、等待确认、压缩上下文，还是出现了需要排查的异常。
+<p>
+  <img src="docs/screenshots/overview.png" width="354" alt="深色状态浮窗：当前任务、上下文、缓存、首字与账号额度" />
+  <img src="docs/screenshots/light.png" width="354" alt="浅色状态浮窗" />
+</p>
 
-因此，这个浮窗也承担 **Codex 状态检测与辅助排障** 的用途：把当前阶段、最近进度、日志更新、工具调用结果和关键性能指标放在一起，让等待过程更容易判断，遇到问题时有具体记录可查。
+*截图由真实 WPF 界面渲染，任务与数值均为示例，不含个人会话或账号信息。*
 
-检测范围限于本地日志和客户端暴露的可观测状态。长时间没有进度不直接等于 bug，没有告警也不代表所有功能都正常；浮窗提供排查线索，不承诺识别或修复所有 Codex 问题。
+## 为什么做它
 
-## 构建与安装
+日常使用 Codex 时遇到了不少 bug：长时间没有可见进度、工具返回异常、任务结束却缺少回复。仅凭聊天界面，很难判断它在执行工具、等待确认、压缩上下文，还是遇到了异常。
 
-要求 Windows x64、Node.js 24+ 和 .NET 10 SDK。构建脚本会将本机 Node 可执行文件及 .NET 运行环境放入 `dist/`。
+Codex Enhance 把这些可观察的状态集中呈现，帮助判断等待过程、发现工具问题、回看具体记录。它是独立的社区项目，与 OpenAI 没有官方关联；提供状态检测与排查线索，不承诺识别或修复所有问题。
+
+## 三步开始使用
+
+1. 从 [Releases](https://github.com/hrx114514x/codex-enhance/releases/latest) 下载 **CodexEnhance-v0.2.0-win-x64.zip**，完整解压。
+2. 确认已安装并登录 Windows Codex 桌面客户端。
+3. 双击 **Start Codex.cmd**，打开 Codex 和状态浮窗。
+
+**无需安装 Node.js、.NET 或开发工具。** 发布包已包含运行环境；适配 Windows x64 上的 `OpenAI.Codex` 程序包。
+
+如果 Codex 已在运行，启动入口会保留它。当前实例未启用连接时，请保存工作并正常退出 Codex，再使用上述入口；不会自动终止你的任务。该入口仅为本次启动启用本机连接，不替换原快捷方式或自启动计划任务。
+
+| 包内入口 | 用途 |
+| --- | --- |
+| **Start Codex.cmd** | 打开 Codex 并连接浮窗，推荐日常使用 |
+| **Install.cmd** | 可选：安装到当前用户目录，创建桌面快捷方式 |
+| **CodexEnhance.exe** | 仅打开浮窗；未连接时可手动选择任务查看日志 |
+| **Preview.cmd** | 使用示例数据预览界面，不读取个人会话 |
+| **开始使用.txt** | 离线说明，包括更新、连接和卸载方法 |
+
+更新时，先从托盘退出旧版浮窗，再解压新版或运行 `Install.cmd`，设置会保留。当前发布包未做代码签名，请从本仓库下载；Release 同时提供 `SHA256SUMS.txt` 供校验。
+
+## 一眼知道当前状态
+
+- **任务进度**：区分工具执行、等待输入、上下文压缩，以及暂时没有可见进度。
+- **性能指标**：查看上下文采样、缓存命中、首字等待与同模型的历史趋势。
+- **工具调用**：日常记录收起，仅明确的 Critical 服务故障主动展开；手动收起后不反复弹出。
+- **工具可用性**：查看 MCP 服务连接和工具目录变化，关注 `read_thread` 等工具是否登记。
+- **账号额度**：查看剩余比例、重置倒计时、本机用量和等效金额估算。
+- **跟随与固定**：自动跟随当前页面，也可固定观察某个任务；主面板和详情按需打开。
+
+<p>
+  <img src="docs/screenshots/quota.png" width="430" alt="账号额度与本机等效金额估算，示例数据" />
+  <img src="docs/screenshots/tools.png" width="360" alt="工具可用性检查，示例目录" />
+</p>
+
+额度百分比与等效金额含义不同：金额根据本机记录和参考价格估算，**不是官方余额、账单或固定订阅上限**。数据不足时不推算总额；其他设备的消耗无法从本机记录补齐。
+
+<details>
+<summary>更多界面：性能详情、严重故障与收起状态</summary>
+
+<p>
+  <img src="docs/screenshots/performance.png" width="430" alt="性能与压缩详情，示例数据" />
+  <img src="docs/screenshots/critical.png" width="354" alt="明确服务启动故障的 Critical 提示，示例数据" />
+</p>
+<img src="docs/screenshots/compact.png" width="260" alt="收起后的轻量状态条" />
+
+</details>
+
+## 常见问题
+
+**看不到浮窗？** 打开 Codex 主窗口。它最小化时浮窗也会隐藏；可在系统托盘选择“显示 / 隐藏”，或通过更多菜单恢复位置。
+
+**为什么显示待连接？** 正常退出 Codex 后，用 `Start Codex.cmd` 或安装后的“Codex + 状态浮窗”打开。客户端内部结构更新、非标准安装和权限差异可能影响连接；未连接时仍可手动查看本地任务日志。
+
+**没有告警就代表没问题吗？** 检测只覆盖已观察到的状态。工具目录已登记不等于执行成功，等待时间长也不直接等于卡死。多窗口、多显示器行为仍需更多实机验证。
+
+**数据存在哪里？** 会话与用量在本机处理，不上传对话正文，不需要额外 API Key。自身设置和派生缓存位于 `%LOCALAPPDATA%\CodexEnhance`，不修改 Codex 原始日志。诊断摘要使用字段白名单。
+
+进一步了解：[指标与检测范围](docs/metrics.md) · [工具可用性检查](docs/tool-capabilities.md) · [额度计算细节](docs/weekly-quota.md)
+
+## 从源码构建
+
+开发环境需要 Node.js 24+（x64）、.NET 10 SDK 和 Windows。采集层只依赖 Node 内置模块，无需 `npm install`。
 
 ```powershell
 git clone https://github.com/hrx114514x/codex-enhance.git
 cd codex-enhance
 npm test
 .\scripts\build.ps1
-.\scripts\install.ps1 -SkipStartupIntegration
-```
-
-采集层只使用 Node 内置模块，无需 `npm install`。安装后从桌面快捷方式打开浮窗，也可以直接运行 `dist\CodexEnhance.exe`。更新已运行的浮窗前先从其托盘退出，再运行安装脚本。
-
-`-SkipStartupIntegration` 安装浮窗和快捷方式，不接入特定启动器。未启用本地 CDP 时，可以点击任务名手动选择本地任务，指标来自日志；自动跟随与实时调用状态需要下述连接配置。
-
-## 使用
-
-- 桌面快捷方式：**Codex 状态浮窗**。
-- 程序：`%LOCALAPPDATA%\Programs\CodexEnhance\CodexEnhance.exe`。
-- 设置与诊断：`%LOCALAPPDATA%\CodexEnhance`。
-- 点击任务名选择本地任务；底部“跟随对话”控制是否随 Codex 页面切换，关闭后显示“固定此对话”。这个开关只控制观察对象，不控制置顶；原图钉已移除。右键可查看详情、切换主题或退出，托盘也可隐藏和退出。
-- 上下文/缓存区域可点击，打开详细指标。工具调用行可展开/收起；异常详情中的“查看全部调用”显示历史。
-- 主面板显示“首字（日志）”：采用 `time_to_first_token_ms`。本轮尚无完成记录时，明确标为“最近记录”，展示最近有该字段的完成轮次；完全缺失则显示“—”，不使用整轮耗时替代，也不声称是屏幕实际首字时间。
-- 外层浮窗的展开状态和位置保存；异常的临时展开不会覆盖用户偏好。
-
-## 自动跟随
-
-浮窗通过本机 CDP 连接识别当前任务及实时调用状态，通过本地会话日志恢复历史指标。客户端需要在正常启动时启用仅监听 `127.0.0.1` 的调试端口，例如启动参数 `--remote-debugging-address=127.0.0.1 --remote-debugging-port=9336`。
-
-采集器会尝试端口 9336、9335、9222，以及 `%APPDATA%\Codex\DevToolsActivePort`。自定义端口可写入 `%LOCALAPPDATA%\CodexEnhance\connection.json`，内容为 `{"port":9336}`。端口应仅供本机使用。
-
-如果已有兼容的 `%LOCALAPPDATA%\OpenAI\CodexTools\Start-CodexToTray.ps1` 启动器，可运行 `.\scripts\install.ps1` 接入启动流程。脚本检查原有启动方法、保存备份、添加本地 CDP 参数并启动浮窗；它不创建管理员计划任务，也不重启现有 Codex。缺少该启动器时请使用 `-SkipStartupIntegration`。
-
-普通 AppsFolder 入口不会自动附加这些参数。未连接时明确显示待连接；客户端结构更新导致不可识别时显示未知，可继续手动选任务。当前适配依赖客户端内部结构，多窗口、多显示器行为仍需进一步实机验证。
-
-## 指标口径
-
-- 上下文：最近 `token_count` 的 `last_token_usage.total_tokens / model_context_window` 估算，显示采样口径，和累计消耗分开。
-- 缓存：最近请求 `cached_input_tokens / input_tokens`；输入分母缺失或为零显示未知。
-- 首 token：使用日志里的 `time_to_first_token_ms`，缺失显示未知，不冒充屏幕首字延迟。
-- 工具执行状态和结果质量分开。`read_thread` 的空轮只提示核查；无输出的成功命令、写入操作不因此判失败。等待较久不自动等同超时。
-- 分级：Info 为普通结果或原因未明的非零退出，只记录；Warning 为缺失/可疑内容或明确超时；Error 为明确执行失败、权限拒绝等；Critical 限于有明确证据的工具服务启动/初始化故障。
-- Info / Warning / Error 只在手动展开的记录里分级呈现，主面板保持中性计数；Critical 才突出并自动展开。同一提示不反复弹开，升级到 Critical 时会提示一次。明确恢复后会撤销对应服务故障。
-- 单条、无错误输出的 `rg` 退出码 1（无匹配）和 `git diff --exit-code/--quiet` 退出码 1（有差异）按 Info 处理；复合命令不会套用其中一个子命令的退出码语义。原始退出码保留在详情。
-- 等级只针对已观察到的调用证据；工具完全未注册、没有产生日志时未必能形成调用记录。没有告警不等于所有工具服务都已检查。
-- 本轮历史异常不表示 Codex 程序本身故障；相同类别合并显示，完整记录可展开查看。
-- 初次打开较长任务时会增量载入历史；未追平之前不把历史片段当成新异常自动展开。
-
-## 性能与卡慢线索
-
-点击上下文/缓存区域，可查看当前阶段、距上次可见进度变化、距最近日志、首 token 与同模型/思考强度下近 5 轮中位数、压缩耗时及服务端压缩进度。
-
-工具执行中、等待确认、压缩中和暂时没有可见进度分别显示。大上下文与低缓存、首 token 相对升高、结束后缺少可见回复记录，只作为核查线索，不自动判为 Critical，也不自动压缩、重试或重启 Codex。不能单凭这些数据分离模型计算、服务端排队和界面渲染耗时。
-
-## 精简版交互
-
-- 主卡片并列显示上下文、缓存、首字；额外区分采集是否实时以及距可见进度变化的时间。
-- 性能详情实时刷新，加入最近 8 轮相同模型和强度的首 token 趋势；缺失指标保留为空，不填零或估算。
-- 调用记录支持本轮、需关注、最近记录筛选；只有 Critical 主动展开。
-- 更多菜单提供连接与诊断、重连、恢复默认位置和主题选择；收起状态也可拖动。
-- 诊断摘要通过字段白名单生成，不导出对话正文、标题、命令、路径或账号凭据。
-- 已移除独立搜索，使用 Codex 官方搜索。更新清理本工具的旧搜索缓存，不改 Codex 历史数据库。
-
-## 数据与隐私
-
-采集器读取 `CODEX_HOME`（默认 `%USERPROFILE%\.codex`）中的任务元数据与会话日志，通过标准输入输出向 WPF 界面发送状态。运行时连接仅访问本机 CDP，不向外部服务上传会话内容。自身设置保存在 `%LOCALAPPDATA%\CodexEnhance`，诊断导出使用字段白名单。
-
-仓库不包含本机日志、会话记录、运行截图、安装包或个人交接笔记。第三方来源与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-## 开发与验证
-
-```powershell
-npm test
-.\scripts\build.ps1
 .\dist\CodexEnhance.exe --self-test .\artifacts\ui-state-tests.json
-.\dist\CodexEnhance.exe --preview --attention
 .\dist\CodexEnhance.exe --render .\artifacts\renders
+.\scripts\package.ps1
 ```
 
-`--preview` 明确显示示例数据，不读实时任务。`--render` 输出原生 WPF 渲染图用于视觉 QA。安装脚本不重启现有 Codex；恢复启动器可运行 `scripts/restore-launcher.ps1`，若启动器后续又被修改则拒绝覆盖。
+`--render` 使用示例数据导出原生界面及状态检查结果。发布脚本在独立目录构建，输出 ZIP 与 SHA-256 校验文件。`src/` 是 WPF 界面，`collector/` 是采集层，`tests/` 是隔离测试，`scripts/` 是构建和启动脚本。
 
-源码结构：`src/` 为 WPF 窗口与交互，`collector/` 为 Node 采集层，`tests/` 为隔离测试，`scripts/` 为构建、安装和启动器恢复脚本。
+已有专用 `Codex Start To Tray` 启动器的开发者可继续使用 `scripts/install.ps1` 接入原流程；普通用户使用发布包即可。第三方代码、图标和运行环境的来源与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
