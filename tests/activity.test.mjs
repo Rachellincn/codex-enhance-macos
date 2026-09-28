@@ -10,7 +10,7 @@ test('current phase resets between model and tools rather than reusing cumulativ
  s.runtime(data([call('a',4000)]),epoch+5000);
  let a=s.snapshot(epoch+6000,true).activity;assert.equal(a.kind,'tools');assert.equal(a.elapsedMs,2000);
  s.runtime(data([{...call('a',4000),status:'completed',completedAtMs:epoch+6000}]),epoch+7000);
- a=s.snapshot(epoch+8000,true).activity;assert.equal(a.kind,'model');assert.equal(a.elapsedMs,1000);
+ a=s.snapshot(epoch+8000,true).activity;assert.equal(a.kind,'model');assert.equal(a.elapsedMs,2000);
 });
 test('parallel tools retain one continuous phase, a new disjoint call starts a new timer',()=>{
  const s=new ThreadState('thread');s.runtime(data([call('a',1000)]),epoch+2000);
@@ -43,10 +43,31 @@ test('brief loss of a sample hides the clock without resetting the same phase on
  assert.equal(recovered.performance.breakdown.segments.find(p=>p.key==='model').ms,2000);
 });
 
-test('a long gap or a genuine phase switch establishes a fresh phase',()=>{
+test('a long gap preserves a proven unchanged phase, a genuine switch establishes a fresh phase',()=>{
  const s=new ThreadState('thread');s.runtime(data(),epoch+1000);s.snapshot(epoch+2000,false);
- s.runtime(data(),epoch+9000);assert.equal(s.snapshot(epoch+10000,true).activity.startedAtMs,epoch+9000);
+ s.runtime(data(),epoch+9000);assert.equal(s.snapshot(epoch+10000,true).activity.startedAtMs,epoch+1000);
  s.runtime(data([call('new',11000)]),epoch+12000);assert.equal(s.snapshot(epoch+13000,true).activity.startedAtMs,epoch+11000);
+});
+
+test('switching to another task and back retains the model clock without inventing measured work',()=>{
+ const a=new ThreadState('a'),b=new ThreadState('b');a.runtime(data(),epoch+1000);a.runtime(data(),epoch+2000);
+ a.pauseTiming(true);b.runtime(data(),epoch+3000);b.runtime(data(),epoch+25000);
+ a.runtime({...data(),turns:[{...data().turns[0],progressSignature:'streaming-text-changed'}]},epoch+30000);
+ assert.equal(a.snapshot(epoch+31000,true).activity.elapsedMs,30000);
+ assert.equal(a.snapshot(epoch+31000,true).performance.breakdown.segments.find(s=>s.key==='model').ms,2000);
+});
+test('a tool that starts and finishes while away advances the model phase to its known end',()=>{
+ const s=new ThreadState('a');s.runtime(data(),epoch+1000);s.pauseTiming(true);
+ s.runtime(data([{...call('away',5000),status:'completed',completedAtMs:epoch+15000}]),epoch+25000);
+ assert.equal(s.snapshot(epoch+26000,true).activity.startedAtMs,epoch+15000);
+});
+test('a tool without a known end while away uses observation time and a new turn never reuses a checkpoint',()=>{
+ const s=new ThreadState('a');s.runtime(data(),epoch+1000);s.pauseTiming(true);
+ s.runtime(data([{id:'away',type:'commandExecution',status:'completed'}]),epoch+25000);
+ assert.equal(s.snapshot(epoch+26000,true).activity.startedAtMs,epoch+25000);
+ const restored=new ThreadState('a',s.activityCheckpoint());
+ restored.runtime({turns:[{id:'new-turn',startedAtMs:epoch+30000,status:'inProgress',items:[]}]},epoch+31000);
+ assert.equal(restored.snapshot(epoch+32000,true).activity.startedAtMs,epoch+31000);
 });
 
 test('temporarily missing current-turn data preserves the same phase anchor but hides it until recovery',()=>{

@@ -144,8 +144,9 @@ export function readRuntimeStore(threadId) {
     return times.length ? Math.min(...times) : null;
   };
   const safeItem = (item, turn) => {
-    if (!/mcpToolCall|commandExecution|webSearch|dynamicToolCall|fileChange|contextCompaction|collabToolCall|imageGeneration|imageView|sleep/.test(item.type ?? '')) return null;
-    return { id: item.id, type: item.type, tool: item.tool, server: item.server, name: item.name,
+    const type=String(item.type).toLowerCase()==='extension'&&['clock.sleep','sleep'].includes(item.kind)?'sleep':item.type;
+    if (!/mcpToolCall|commandExecution|webSearch|dynamicToolCall|fileChange|contextCompaction|collabToolCall|imageGeneration|imageView|sleep/.test(type ?? '')) return null;
+    return { id: item.id, type, tool: item.tool, server: item.server, name: item.name,
       status: item.status, completed: item.completed, exitCode: item.exitCode,
       startedAtMs: item.startedAtMs ?? turn.commandExecutionStartedAtMsById?.[item.id], completedAtMs: item.completedAtMs, durationMs: item.durationMs,
       error: item.error || item.failure ? { message: String(item.error?.message ?? '调用异常').slice(0, 160) } : null,
@@ -154,6 +155,9 @@ export function readRuntimeStore(threadId) {
   return { title: typeof (conversation.name ?? conversation.title) === 'string' ? (conversation.name ?? conversation.title).slice(0, 160) : '', model: conversation.latestModel ?? conversation.model,
     effort: conversation.latestReasoningEffort, threadStatus: conversation.threadRuntimeStatus,
     turns: ordered.map(t => ({ id: t.turnId ?? t.id, status: t.status,
+      requestedModel: typeof t.params?.model==='string'?t.params.model:null,
+      modelRoutes: (t.items??[]).filter(i=>i.type==='modelRerouted').slice(-12)
+        .map(i=>({id:i.id,fromModel:i.fromModel,toModel:i.toModel})),
       progressSignature: (t.items ?? []).slice(-8).map(i => [i.id, i.type, i.status, typeof i.text === 'string' ? i.text.length : 0, typeof i.aggregatedOutput === 'string' ? i.aggregatedOutput.length : 0].join(':')).join('|'),
       hasUserInput: (t.items ?? []).some(i => i.type === 'userMessage'),
       hasReply: (t.items ?? []).some(i => i.type === 'agentMessage' && typeof i.text === 'string' && i.text.trim().length > 0),

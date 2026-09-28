@@ -3,6 +3,7 @@ import { classifyFailure } from './diagnostics.mjs';
 import { performanceView, turnProblemNotice, firstOutputView } from './performance.mjs';
 import { addTimingRange, observeTiming, elapsedTurnMs } from './timing.mjs';
 import {observeActivity,activityView} from './activity.mjs';
+import {modelId,observeReroute,modelIdentityView} from './models.mjs';
 
 const finite = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
 export function milliseconds(value) {
@@ -102,23 +103,32 @@ export function normalizeTool(item, meta = {}) {
 }
 
 export class ThreadState {
-  constructor(id) {
+  constructor(id, activityCheckpoint = null) {
     this.id = id; this.title = ''; this.model = ''; this.effort = ''; this.turns = new Map();
     this.tools = new Map(); this.latestTurnId = ''; this.latestTurnAt = 0; this.lastSampleAt = 0;
     this.context = null; this.cacheHit = null; this.totalTokens = null; this.compactions = 0;
     this.lastCompaction = null; this.usageSeen = new Set(); this.lastCompactionAt = 0;
     this.lastRuntimeAt = 0; this.lastActivityAt = 0;
     this.modelAt = 0;
+    this.savedActivity = activityCheckpoint;
   }
   turn(id, at = 0) {
     if (!id) return null;
     if (!this.turns.has(id)) this.turns.set(id, { id, startedAtMs: at || null, completedAtMs: null, durationMs: null, ttftMs: null, phase: 'working', model: this.model, effort: this.effort });
+    if(this.savedActivity?.turnId===id) {
+      this.turns.get(id).liveActivity=this.savedActivity.activity;
+      this.turns.get(id).activityVerified=false;this.savedActivity=null;
+    }
     if (at >= this.latestTurnAt) { this.latestTurnAt = at; this.latestTurnId = id; }
     return this.turns.get(id);
   }
   pauseTiming(preserveActivity = false) {
     const turn = this.turns.get(this.latestTurnId);
     if (turn) { turn.timingObservation = null; turn.activityVerified=false; if(!preserveActivity)turn.liveActivity = null; }
+  }
+  activityCheckpoint() {
+    const turn=this.turns.get(this.latestTurnId);
+    return turn?.liveActivity&&!turn.completedAtMs?{turnId:turn.id,activity:structuredClone(turn.liveActivity)}:null;
   }
   applyUsage(info, at) {
     const last = normalizeUsage(info.last_token_usage ?? info.last ?? info.usage);
@@ -206,7 +216,9 @@ export class ThreadState {
     if (row.type !== 'event_msg') return;
     this.lastActivityAt = Math.max(this.lastActivityAt, at);
     const kind = p.type;
-    if (kind === 'thread_settings_applied') {
+    if(kind==='model_reroute') {
+      observeReroute(this.turns.get(p.turn_id??this.latestTurnId),p,at,'log');
+    } else if (kind === 'thread_settings_applied') {
       if (at >= this.modelAt) { this.modelAt = at; this.model = p.thread_settings?.model ?? this.model; this.effort = p.thread_settings?.reasoning_effort ?? this.effort; }
     } else if (kind === 'task_started') {
       const turn = this.turn(p.turn_id, milliseconds(p.started_at) ?? at);
@@ -264,7 +276,8 @@ export class ThreadState {
       const turn = this.turn(t.id ?? t.turnId, at);
       if (!turn) continue;
       if (t.progressSignature && t.progressSignature !== turn.progressSignature) { turn.progressSignature = t.progressSignature; turn.lastObservedProgressAt = now; }
-      turn.model ||= data.model; turn.effort ||= data.effort;
+      turn.model = modelId(t.requestedModel)??(turn.model||data.model); turn.effort ||= data.effort;
+      for(const route of t.modelRoutes??[])observeReroute(turn,route,finite(route.atMs)??now,'runtime');
       if (t.hasUserInput) turn.hasUserInput = true;
       if (t.hasReply) turn.hasReply = true;
       turn.outputObserved = true;
@@ -303,7 +316,12 @@ export class ThreadState {
       // provider/network waiting. It is not a measurement of pure reasoning.
       const modelActive = !!currentRuntime && /^(inprogress|in_progress|active|running)$/i.test(currentRuntime.status??'') && !runningTools;
       observeTiming(latest,now,{modelActive});
-      observeActivity(latest,[...this.tools.values()].filter(t=>t.turnId===latest.id),now);
+      // Streaming reply text changes within a phase. Only execution/compaction
+      // items identify a boundary, using the runtime list before reducer pruning.
+      const boundary=Array.isArray(currentRuntime?.items)?hash(currentRuntime.items
+        .filter(i=>/toolcall|commandexecution|websearch|filechange|contextcompaction|imagegeneration|imageview|sleep/i.test(i.type??''))
+        .map(i=>[i.id,i.type])):null;
+      observeActivity(latest,[...this.tools.values()].filter(t=>t.turnId===latest.id),now,boundary);
     }
     else if (latest) {
       this.pauseTiming(true);
@@ -332,6 +350,7 @@ export class ThreadState {
       compactions: this.compactions, lastCompaction: this.lastCompaction,
       performance: performanceView(this, current, now, runtimeConnected),
       activity: activityView(turn,current,now,runtimeConnected),
+      modelIdentity: modelIdentityView(turn,this.model),
       tools: { running: running.filter(t => t.status === 'running').length, completed: current.filter(t => t.status === 'completed').length,
         attention: attention.length, notes: notes.length, highestSeverity, levelCounts, issues: attention.slice(0, 20), items: all.slice(0, 100), runtimeAvailable: runtimeConnected },
       updatedAtMs: now };

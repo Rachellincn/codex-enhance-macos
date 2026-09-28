@@ -174,10 +174,9 @@ public partial class MainWindow : Window
         ContextFill.Width = 83 * Math.Clamp(N(data["context"]?["percent"]) ?? 0, 0, 100) / 100;
         ContextText.ToolTip = "最近一次上下文采样，不是累计 token 消耗";
         CacheText.ToolTip = "最近一次请求的缓存输入占比";
-        var model = S(data["model"]).Replace("gpt-6-astra", "Astra").Replace("gpt-6-sol", "Sol").Replace("gpt-6-luna", "Luna").Replace("gpt-", "GPT-");
-        var effort = S(data["effort"]) switch { "xhigh" => "极高", "high" => "高", "medium" => "中", "low" => "低", "max" => "最高", "ultra" => "超高", var x => x };
-        ModelText.Text = string.IsNullOrEmpty(model) ? "尚无模型记录" : model + (string.IsNullOrEmpty(effort) ? "" : " · " + effort);
-        ModelText.ToolTip = S(data["model"]);
+        ModelText.Text = CurrentModelText(data);
+        string modelSource=string.IsNullOrEmpty(S(data["modelIdentity"]?["response"]))?"任务设置，尚未取得上游返回标识":"上游响应";
+        ModelButton.ToolTip = $"来源：{modelSource}\n选定模型：{S(data["model"])} · {S(data["effort"])}\n点击查看记录";
         var attention = (int)(N(data["tools"]?["attention"]) ?? 0);
         var running = (int)(N(data["tools"]?["running"]) ?? 0);
         var completed = (int)(N(data["tools"]?["completed"]) ?? 0);
@@ -469,6 +468,7 @@ public partial class MainWindow : Window
         Add("账号额度与等效金额", () => OpenQuota(this, new RoutedEventArgs()));
         Add("语音连接", () => OpenVoice(this, new RoutedEventArgs()));
         Add("性能与压缩详情", () => OpenMetrics(this, new RoutedEventArgs()));
+        Add("当前模型", () => OpenModels(this, new RoutedEventArgs()));
         Add("恢复默认位置", () => { settings.RightOffset = 22; settings.TopOffset = null; Save(); PositionNearHost(); });
         menu.Items.Add(new Separator());
         Add("跟随系统主题", () => { settings.Theme = "system"; ApplyTheme(); Save(); });

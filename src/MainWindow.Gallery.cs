@@ -39,8 +39,17 @@ public partial class MainWindow
           {"state":"ready","watched":{"state":"listed"},"issues":[],"changes":[],"observations":[],"servers":[{"name":"codex_app","runtimeStatus":"connected","authStatus":"unsupported","catalogComplete":true,"toolCount":3,"tools":["read_thread","list_threads","open_in_codex"]},{"name":"cua_repl","runtimeStatus":"connected","authStatus":"unsupported","catalogComplete":true,"toolCount":2,"tools":["js","js_reset"]}]}
           """);
         data["toolHealth"]!["checkedAtMs"] = now;
+        data["modelIdentity"]=new JsonObject { ["selected"]="gpt-5.6-sol",["requested"]="gpt-5.6-sol",["response"]="gpt-6-sol",["source"]="response_model",["state"]="different",["observedAtMs"]=now,["records"]=new JsonArray(),["routes"]=new JsonArray() };
+        data["model"]="gpt-5.6-sol";
         settings.Theme = "dark"; ApplyTheme(); disclosure = new Disclosure(true); ApplySnapshot(data);
         Capture(Path.Combine(directory, "overview.png"));
+        ModelButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        bool modelEntryWorks=detailWindow?.Title=="Codex · 当前模型"&&ModelText.Text=="GPT-6 Sol";
+        CaptureGalleryDetail(Path.Combine(directory,"upstream-model.png"));detailWindow?.Close();detailWindow=null;
+        var unknownModel=data.DeepClone().AsObject();unknownModel["modelIdentity"]!["response"]=null;unknownModel["modelIdentity"]!["state"]="unavailable";ApplySnapshot(unknownModel);
+        bool taskFallback=ModelText.Text=="GPT-5.6 Sol";
+        Capture(Path.Combine(directory,"upstream-unknown.png"));ApplySnapshot(data);
+        File.WriteAllText(Path.Combine(directory,"model-check.json"),System.Text.Json.JsonSerializer.Serialize(new {modelEntryWorks,taskFallback,passed=modelEntryWorks&&taskFallback},Settings.JsonOptions));
         bool currentToolPhase = PhaseText.Text == "调用工具" && ElapsedText.Text == "00:20";
         ActivityButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
         bool timingOpensDetails = detailWindow?.Title == "Codex · 性能详情";
@@ -81,6 +90,7 @@ public partial class MainWindow
         CaptureScene(Path.Combine(directory,"floating-light.png"));
         ApplySnapshot(completed);Capture(Path.Combine(directory,"completed-light.png"));ApplySnapshot(data);
         OpenMetrics(this,new RoutedEventArgs());CaptureGalleryDetail(Path.Combine(directory,"performance-light.png"));
+        OpenModels(this,new RoutedEventArgs());CaptureGalleryDetail(Path.Combine(directory,"upstream-model-light.png"));
         OpenQuotaHistory(this,new RoutedEventArgs());CaptureGalleryDetail(Path.Combine(directory,"weekly-history-light.png"));
         detailWindow?.Close();detailWindow=null;
     }

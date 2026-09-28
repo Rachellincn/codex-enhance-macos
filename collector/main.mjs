@@ -48,7 +48,7 @@ while (!stopping) {
     if (selectionReset) { lockedId = null; manualId = null; follow = true; }
     const current = await desktop.poll(lockedId ?? (!follow ? manualId : null));
     const id = lockedId ?? (!follow ? manualId : current.threadId ?? (!desktop.connected ? manualId : null));
-    if(timedState&&id&&timedState.id!==id)pauseTiming();
+    if(timedState&&id&&timedState.id!==id)pauseTiming(true);
     else if(!id||!current.runtime)pauseTiming(true);
     const selection = lockedId ? 'locked' : !follow || (!desktop.connected && manualId) ? 'manual' : id ? 'auto' : 'none';
     const toolHealth = capabilities.sample(desktop.activeSession, id, Boolean(current.runtime));

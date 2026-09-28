@@ -38,7 +38,7 @@ export class JsonlTail {
           if (this.discarding) { this.discarding = false; continue; }
           // Skip large image/tool payloads which contain no relevant record header.
           const prefix = line.subarray(0, 220).toString('utf8');
-          if (!/"type"\s*:\s*"(?:event_msg|turn_context|session_meta|compacted|token_usage_record)"/.test(prefix)) continue;
+          if (!/"type"\s*:\s*"(?:event_msg|turn_context|session_meta|compacted|token_usage_record|response_item)"/.test(prefix)) continue;
           try { this.onRecord(JSON.parse(line.toString('utf8'))); }
           catch (e) { if (e instanceof SyntaxError) { this.malformed++; this.onMalformed?.(prefix); } else throw e; }
         }

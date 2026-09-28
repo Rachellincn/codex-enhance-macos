@@ -15,7 +15,7 @@
 
 ## 快速开始
 
-1. 下载 [**CodexEnhance-v0.3.1-win-x64.zip**](https://github.com/hrx114514x/codex-enhance/releases/download/v0.3.1/CodexEnhance-v0.3.1-win-x64.zip)，完整解压。
+1. 下载 [**CodexEnhance-v0.4.0-win-x64.zip**](https://github.com/hrx114514x/codex-enhance/releases/download/v0.4.0/CodexEnhance-v0.4.0-win-x64.zip)，完整解压。
 2. 确认已安装并登录 Windows Codex 桌面客户端。
 3. 双击 **Start Codex.cmd**。
 
@@ -28,6 +28,7 @@
 | 功能 | 你能看到什么 |
 | --- | --- |
 | **实时阶段** | 当前正在思考、调用工具、等待确认或整理上下文；只显示当前阶段的计时 |
+| **当前模型** | 直接显示模型名，有上游响应记录时自动采用返回模型；悬停查看来源 |
 | **工具动态** | 并行调用轮换展示，记录和异常按需展开 |
 | **性能详情** | 上下文、缓存、首字趋势和本轮耗时拆解 |
 | **账号额度** | 剩余比例、重置倒计时和本机等效金额估算 |
@@ -47,6 +48,7 @@
   <img src="docs/screenshots/tools.png" width="410" alt="工具可用性检查" />
 </p>
 <img src="docs/screenshots/compact.png" width="292" alt="收起后的状态条" />
+<img src="docs/screenshots/upstream-model.png" width="410" alt="当前模型及响应来源，示例数据" />
 
 </details>
 
@@ -57,6 +59,7 @@
 ## 使用说明
 
 - 数据在本机处理，不上传对话内容，不需要额外 API Key。
+- 切换对话保留同一阶段的计时；[上游模型识别](docs/models.md) 取决于客户端是否提供响应记录，不能保证检测灰测。
 - 金额是本机模型用量估算，**不是官方余额或账单**；不含语音和其他设备的用量。
 - 支持 Windows x64 的 Codex 桌面程序包。客户端更新可能影响连接，多个窗口与显示器仍在持续验证。
 - 发布包目前未签名，附有 SHA-256 校验文件。

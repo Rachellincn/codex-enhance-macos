@@ -48,6 +48,12 @@ public static class Verification
         var secret = JsonNode.Parse("""{"title":"PRIVATE","threadId":"PRIVATE","context":{"used":100,"path":"PRIVATE"},"tools":{"items":[{"name":"PRIVATE","command":"PRIVATE","detail":"PRIVATE","severity":"error","exitCode":1,"durationMs":12}]},"connection":{"cdp":"connected","runtime":true,"message":"PRIVATE"}}""")!.AsObject();
         string report = DiagnosticReport.Create(secret).ToJsonString();
         Check(!report.Contains("PRIVATE") && report.Contains("exitCode") && report.Contains("100"), "diagnostic export contains allowed metrics without private snapshot fields");
+        var identity=JsonNode.Parse("""{"model":"gpt-5.6-sol","modelIdentity":{"response":"gpt-6-sol","state":"different"}}""")!.AsObject();
+        Check(MainWindow.CurrentModelText(identity)=="GPT-6 Sol","main footer prefers upstream response model including generation");
+        identity["modelIdentity"]!["response"]=null;identity["modelIdentity"]!["routedModel"]="gpt-6-astra";
+        Check(MainWindow.CurrentModelText(identity)=="GPT-5.6 Sol","main footer falls back to task model without treating routing as a completed response");
+        identity["modelIdentity"]!["requested"]="gpt-6-sol";identity["model"]="gpt-6-astra";
+        Check(MainWindow.CurrentModelText(identity)=="GPT-6 Sol","active turn request takes priority over the picker for the next turn");
         var activity = JsonNode.Parse("""{"activity":{"kind":"model","startedAtMs":10000,"observedAtMs":20000,"items":[]}}""")!.AsObject();
         var modelPhase = MainWindow.ActivityPresentation(activity,20000,false);
         Check(modelPhase.Title=="思考 / 响应"&&modelPhase.Timer=="00:10", "current model phase displays its own duration");

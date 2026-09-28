@@ -3,6 +3,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { JsonlTail } from './tail.mjs';
 import { ThreadState } from './state.mjs';
+import {observeModelLog} from './models.mjs';
 
 // Filter before LIMIT so a burst of worker threads cannot displace user conversations.
 const userThreads = `CASE WHEN json_valid(source) THEN json_type(source, '$.subagent') IS NULL
@@ -15,7 +16,7 @@ export function cleanTitle(value) {
   return source.split(/\r?\n/).map(s => s.trim()).find(s => s && !s.startsWith('#') && !s.startsWith('<'))?.slice(0, 80) ?? '未命名任务';
 }
 export class Catalog {
-  constructor(home) { this.home = home; this.db = null; this.logs = null; this.states = new Map(); this.tails = new Map(); this.metaCache = new Map(); this.lastMetaAt = 0; this.lastFileScan = 0; this.fileIndex = new Map(); this.logCursor = new Map(); }
+  constructor(home) { this.home = home; this.db = null; this.logs = null; this.states = new Map(); this.tails = new Map(); this.metaCache = new Map(); this.lastMetaAt = 0; this.lastFileScan = 0; this.fileIndex = new Map(); this.logCursor = new Map(); this.activities = new Map(); }
   connect() {
     if (!this.db) { this.db = new DatabaseSync(path.join(this.home, 'state_5.sqlite'), { readOnly: true, timeout: 300 }); this.db.exec('PRAGMA query_only=ON'); }
   }
@@ -54,7 +55,7 @@ export class Catalog {
     const meta = this.metadata(id);
     if (!meta) return null;
     let state = this.states.get(id);
-    if (!state) { state = new ThreadState(id); this.states.set(id, state); }
+    if (!state) { state = new ThreadState(id,this.activities.get(id)); this.activities.delete(id); this.states.set(id, state); }
     state.title = cleanTitle(meta.name || meta.title); state.model ||= meta.model; state.effort ||= meta.reasoning_effort;
     const files = this.discoverFiles(id, meta.rollout_path);
     let caughtUp = true, errors = 0;
@@ -79,7 +80,11 @@ export class Catalog {
     // Bound memory when the user navigates across many tasks.
     if (this.states.size > 8) {
       const old = [...this.states.keys()].find(k => k !== id);
+      const checkpoint=this.states.get(old)?.activityCheckpoint();
+      if(checkpoint)this.activities.set(old,checkpoint);
+      while(this.activities.size>128)this.activities.delete(this.activities.keys().next().value);
       this.states.delete(old);
+      this.logCursor.delete(old);
       for (const key of this.tails.keys()) if (key.startsWith(`${old}:`)) this.tails.delete(key);
     }
     return { state, caughtUp, errors };
@@ -88,10 +93,12 @@ export class Catalog {
     try {
       this.logs ??= new DatabaseSync(path.join(this.home, 'logs_2.sqlite'), { readOnly: true, timeout: 200 });
       const turn = state.turns.get(state.latestTurnId);
-      if (!turn || turn.completedAtMs) return;
-      const rows = this.logs.prepare('SELECT id, ts, feedback_log_body FROM logs WHERE thread_id=? AND ts>=? AND id>? ORDER BY ts,id LIMIT 300').all(id, Math.floor((turn.startedAtMs ?? Date.now()) / 1000), this.logCursor.get(id) ?? 0);
+      if (!turn) return;
+      const rows = this.logs.prepare('SELECT id, ts, ts_nanos, target, feedback_log_body FROM logs WHERE thread_id=? AND ts>=? AND id>? ORDER BY id LIMIT 300').all(id, Math.floor((turn.startedAtMs ?? Date.now()) / 1000), this.logCursor.get(id) ?? 0);
       for (const row of rows) {
         this.logCursor.set(id, Math.max(this.logCursor.get(id) ?? 0, row.id));
+        observeModelLog(state,row);
+        if(turn.completedAtMs)continue;
         if (/op: Compact|response\.compaction\.compacting|session_task\.compact/.test(row.feedback_log_body)) { turn.phase = 'compacting'; turn.wasCompaction = true; turn.compactionStartedAtMs ??= row.ts * 1000; }
         if (/response\.compaction\.compacting/.test(row.feedback_log_body)) turn.compactionHeartbeatAtMs = row.ts * 1000;
       }
