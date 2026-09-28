@@ -1,4 +1,4 @@
-Codex Enhance 0.3.0
+Codex Enhance 0.3.1
 看清 Codex 正在做什么。
 
 开始使用

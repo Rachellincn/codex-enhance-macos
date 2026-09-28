@@ -33,3 +33,26 @@ test('approval, compaction and completion are distinct states with no completed 
  s.runtime(data([],'completed'),epoch+6000);
  const result=s.snapshot(epoch+20000,true).activity;assert.equal(result.kind,'complete');assert.equal(result.elapsedMs,null);
 });
+
+test('brief loss of a sample hides the clock without resetting the same phase on recovery',()=>{
+ const s=new ThreadState('thread');s.runtime(data(),epoch+1000);s.runtime(data(),epoch+2000);
+ assert.equal(s.snapshot(epoch+2500,false).activity.kind,'unknown');
+ s.runtime(data(),epoch+3000);const recovered=s.snapshot(epoch+4000,true);
+ assert.equal(recovered.activity.startedAtMs,epoch+1000);assert.equal(recovered.activity.elapsedMs,3000);
+ // The phase clock is not a claim of continuously measured model work.
+ assert.equal(recovered.performance.breakdown.segments.find(p=>p.key==='model').ms,2000);
+});
+
+test('a long gap or a genuine phase switch establishes a fresh phase',()=>{
+ const s=new ThreadState('thread');s.runtime(data(),epoch+1000);s.snapshot(epoch+2000,false);
+ s.runtime(data(),epoch+9000);assert.equal(s.snapshot(epoch+10000,true).activity.startedAtMs,epoch+9000);
+ s.runtime(data([call('new',11000)]),epoch+12000);assert.equal(s.snapshot(epoch+13000,true).activity.startedAtMs,epoch+11000);
+});
+
+test('temporarily missing current-turn data preserves the same phase anchor but hides it until recovery',()=>{
+ const s=new ThreadState('thread');s.runtime(data(),epoch+1000);s.runtime(data(),epoch+2000);
+ s.runtime({turns:[]},epoch+2500);assert.equal(s.snapshot(epoch+2700,true).activity.kind,'unknown');
+ s.runtime(data(),epoch+3000);assert.equal(s.snapshot(epoch+4000,true).activity.startedAtMs,epoch+1000);
+ s.runtime(data([call('a',4000)]),epoch+5000);s.runtime({turns:[]},epoch+5500);
+ const gap=s.snapshot(epoch+6000,true);assert.equal(gap.tools.running,0);assert.equal(gap.activity.kind,'unknown');
+});

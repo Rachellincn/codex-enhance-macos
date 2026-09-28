@@ -34,4 +34,9 @@ test('CDP discovery, focus selection, live tools and completion work through a r
   const liveReply = await link.poll(null); state.runtime(liveReply.runtime);
   assert.deepEqual(state.snapshot(Date.now(),true).firstOutput,{state:'observed',ms:reply.expectedMs});
   assert.equal(state.snapshot(Date.now(),true).ttftMs,null);
+  child.send({type:'sleep-history'});await once(child,'message');
+  const history=await link.poll(null);state.runtime(history.runtime);
+  assert.equal(state.snapshot(Date.now(),true).tools.running,1);
+  assert.equal(state.snapshot(Date.now(),true).activity.runningCount,1);
+  assert.ok(state.snapshot(Date.now(),true).tools.items.filter(i=>i.name==='sleep').every(i=>i.status==='unknown'));
 });

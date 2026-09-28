@@ -20,6 +20,7 @@ const server = http.createServer((req, res) => { res.setHeader('Content-Type', '
 server.listen(0, '127.0.0.1', () => process.send?.({ port: server.address().port, id }));
 process.on('message', message => {
   if (message.type === 'complete') { turn.items[0].status = 'completed'; process.send?.({ type: 'completed' }); }
+  if (message.type === 'sleep-history') { turn.items.push(...Array.from({length:17},(_,i)=>({id:`sleep-${i}`,type:'sleep',durationMs:20000}))); process.send?.({type:'sleep-history-ready'}); }
   if (message.type === 'remove-tool') { directoryTools = {}; process.send?.({ type: 'removed' }); }
   if (message.type === 'first-reply') {
     const atMs = Date.now(); turn.items.push({ id: 'reply', type: 'agentMessage', text: 'Fixture output' });

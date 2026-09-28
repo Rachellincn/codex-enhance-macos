@@ -55,6 +55,8 @@ public static class Verification
         var toolPhase=MainWindow.ActivityPresentation(activity,20000,false);
         Check(toolPhase.Title=="调用工具"&&toolPhase.Timer=="00:01", "switching to tools resets the displayed stage duration");
         Check(MainWindow.ActivityPresentation(activity,22000,false).Detail.Contains("网页检索"), "parallel tool labels rotate to the next active item");
+        activity["activity"]!["runningCount"]=20;
+        Check(MainWindow.ActivityPresentation(activity,20000,false).Detail.StartsWith("20 项并行"), "parallel count uses the full running count rather than the truncated display list");
         Check(!MainWindow.ActivityPresentation(activity,30000,false).Active, "outdated observations cannot keep a live stage clock");
         Check(MainWindow.ActivityPresentation(activity,20000,true).Timer=="—", "stale collector hides the stage clock");
         activity["activity"] = new JsonObject { ["kind"]="complete" };

@@ -19,7 +19,7 @@ const weekly = new WeeklyQuota(home, stateDir);
 const voiceUsage = new VoiceUsage(stateDir);
 let manualId = seed, lockedId = null, follow = true, lastId = null, stopping = false;
 let timedState = null;
-const pauseTiming = () => { timedState?.pauseTiming(); timedState = null; };
+const pauseTiming = (preserveActivity=false) => { timedState?.pauseTiming(preserveActivity); timedState = null; };
 const write = data => { if (!process.stdout.destroyed) process.stdout.write(`${JSON.stringify(data)}\n`); };
 const rl = readline.createInterface({ input: process.stdin });
 rl.on('line', line => {
@@ -48,7 +48,8 @@ while (!stopping) {
     if (selectionReset) { lockedId = null; manualId = null; follow = true; }
     const current = await desktop.poll(lockedId ?? (!follow ? manualId : null));
     const id = lockedId ?? (!follow ? manualId : current.threadId ?? (!desktop.connected ? manualId : null));
-    if (timedState?.id !== id || !current.runtime) pauseTiming();
+    if(timedState&&id&&timedState.id!==id)pauseTiming();
+    else if(!id||!current.runtime)pauseTiming(true);
     const selection = lockedId ? 'locked' : !follow || (!desktop.connected && manualId) ? 'manual' : id ? 'auto' : 'none';
     const toolHealth = capabilities.sample(desktop.activeSession, id, Boolean(current.runtime));
     const quota = weekly.sample(desktop.activeSession);
@@ -66,7 +67,7 @@ while (!stopping) {
         write({ schemaVersion: 1, ...snapshot, connection, toolHealth, quota, voice, recentThreads, historyLoading: !data.caughtUp, readErrors: data.errors });
       } else { pauseTiming(); write({ schemaVersion: 1, threadId: id, phase: 'unknown', connection: { ...connection, message: '未找到这个任务的本地记录' }, quota, voice, recentThreads, updatedAtMs: Date.now() }); }
     } else write({ schemaVersion: 1, phase: 'unknown', connection, quota, voice, recentThreads, updatedAtMs: Date.now() });
-  } catch (e) { pauseTiming(); write({ schemaVersion: 1, phase: 'unknown', error: String(e.message).slice(0, 180), connection: { cdp: 'waiting', selection: 'none', message: '采集暂不可用，正在重连' }, updatedAtMs: Date.now() }); }
+  } catch (e) { pauseTiming(true); write({ schemaVersion: 1, phase: 'unknown', error: String(e.message).slice(0, 180), connection: { cdp: 'waiting', selection: 'none', message: '采集暂不可用，正在重连' }, updatedAtMs: Date.now() }); }
   if (args.includes('--once')) break;
   await new Promise(r => setTimeout(r, Math.max(100, 900 - (Date.now() - start))));
 }

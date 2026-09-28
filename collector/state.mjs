@@ -55,15 +55,18 @@ export function readThreadQuality(result) {
 
 export function normalizeTool(item, meta = {}) {
   const originalType = item?.type ?? '';
-  const type = originalType.toLowerCase();
-  if (!/mcptoolcall|commandexecution|dynamictoolcall|websearch|filechange|collabtoolcall|imagegeneration|imageview|sleep/.test(type) && !(type === 'extension' && /web|image|browser|tool/.test(item.kind ?? ''))) return null;
-  const name = item.tool ?? item.name ?? item.kind ?? ({ commandexecution: 'exec_command', websearch: 'web.search', filechange: 'apply_patch' }[type]) ?? originalType;
+  const extensionKind=String(item.kind??'').toLowerCase();
+  const type = originalType.toLowerCase()==='extension'&&['sleep','clock.sleep'].includes(extensionKind)?'sleep':originalType.toLowerCase();
+  if (!/mcptoolcall|commandexecution|dynamictoolcall|websearch|filechange|collabtoolcall|imagegeneration|imageview|sleep/.test(type) && !(type === 'extension' && /web|image|browser|tool/i.test(item.kind ?? ''))) return null;
+  const name = type==='sleep'?'sleep':item.tool ?? item.name ?? item.kind ?? ({ commandexecution: 'exec_command', websearch: 'web.search', filechange: 'apply_patch' }[type]) ?? originalType;
   const args = item.arguments ?? item.args ?? {};
   const identityArgs = /read_thread/.test(name) ? { threadId: args.threadId, hostId: args.hostId ?? 'local' } : args;
   const matchKey = hash([name, type === 'commandexecution' ? item.command : identityArgs]);
-  let status = String(item.status ?? (meta.completed ? 'completed' : 'inProgress')).toLowerCase();
-  status = /inprogress|in_progress|running|started/.test(status) ? 'running'
-    : /fail|error/.test(status) ? 'failed' : /cancel|abort|interrupt/.test(status) ? 'interrupted' : 'completed';
+  const reported=String(item.status??'').toLowerCase();
+  const statusMissing=!reported&&typeof item.completed!=='boolean'&&typeof meta.completed!=='boolean';
+  let status=/fail|error/.test(reported)?'failed':/cancel|abort|interrupt/.test(reported)?'interrupted'
+    :/complete|succeed|success|done/.test(reported)||meta.completed===true||item.completed===true?'completed'
+    :/inprogress|in_progress|running|started/.test(reported)||meta.completed===false||item.completed===false?'running':'unknown';
   const result = item.result;
   const error = item.error;
   const exitCode = item.exit_code ?? item.exitCode;
@@ -80,16 +83,18 @@ export function normalizeTool(item, meta = {}) {
   const duration = finite(item.durationMs ?? item.duration_ms) ??
     (typeof item.duration === 'object' ? (item.duration.secs ?? 0) * 1000 + (item.duration.nanos ?? 0) / 1e6 : finite(item.duration));
   let start = finite(meta.startedAtMs ?? item.startedAtMs) ?? (!meta.completed && meta.source === 'log' && status === 'running' ? finite(meta.timestamp) : null);
-  const anchoredEnd = finite(meta.completedAtMs ?? item.completedAtMs) ?? (status !== 'running' && meta.source === 'log' ? finite(meta.timestamp) : null);
+  const terminal=['completed','failed','interrupted'].includes(status);
+  const anchoredEnd = finite(meta.completedAtMs ?? item.completedAtMs) ?? (terminal && meta.source === 'log' ? finite(meta.timestamp) : null);
   const timingStart = start ?? (anchoredEnd !== null && duration !== null && duration >= 0 ? anchoredEnd-duration : null);
   const timingEnd = anchoredEnd ?? (start !== null && duration !== null && duration >= 0 ? start+duration : null);
-  const end = finite(meta.completedAtMs ?? item.completedAtMs) ?? (status !== 'running' ? finite(meta.timestamp) : null);
+  const end = finite(meta.completedAtMs ?? item.completedAtMs) ?? (terminal ? finite(meta.timestamp) : null);
   if (start === null && end !== null && duration !== null) start = end - duration;
   const actualDuration = duration ?? (start !== null && end !== null ? Math.max(0, end - start) : null);
   return { id: String(item.id ?? hash([name, meta.turnId, start, end])), turnId: meta.turnId ?? '', name, label: toolLabel(`${item.server ?? ''}.${name}`, originalType),
     status, executionStatus, server: item.server ?? null, exitCode: Number.isInteger(exitCode) ? exitCode : null, category,
     startedAtMs: start, completedAtMs: end, durationMs: actualDuration, severity, reason, detail, quality, resultSummary,
-    timingStartAtMs: timingStart, timingEndAtMs: status === 'running' ? null : timingEnd,
+    timingStartAtMs: timingStart, timingEndAtMs: terminal ? timingEnd : null,
+    statusMissing, reportedAtMs: finite(meta.timestamp),
     seenRunningAtMs: status === 'running' ? finite(meta.timestamp) : null,
     observedStartedAtMs: status === 'running' ? finite(meta.timestamp) : null,
     timingApproximate: meta.source === 'runtime' && anchoredEnd === null,
@@ -111,9 +116,9 @@ export class ThreadState {
     if (at >= this.latestTurnAt) { this.latestTurnAt = at; this.latestTurnId = id; }
     return this.turns.get(id);
   }
-  pauseTiming() {
+  pauseTiming(preserveActivity = false) {
     const turn = this.turns.get(this.latestTurnId);
-    if (turn) { turn.timingObservation = null; turn.liveActivity = null; }
+    if (turn) { turn.timingObservation = null; turn.activityVerified=false; if(!preserveActivity)turn.liveActivity = null; }
   }
   applyUsage(info, at) {
     const last = normalizeUsage(info.last_token_usage ?? info.last ?? info.usage);
@@ -134,8 +139,15 @@ export class ThreadState {
     if (!tool) return;
     const old = this.tools.get(tool.id);
     // Completed durable records win over stale in-progress runtime snapshots.
-    if (old && old.status !== 'running' && tool.status === 'running') return;
-    if (old?.source === 'log' && old.status !== 'running' && tool.source === 'runtime') return;
+    const terminal=old&&['completed','failed','interrupted'].includes(old.status);
+    if (terminal && ['running','unknown'].includes(tool.status)) return;
+    if (old?.source === 'log' && terminal && tool.source === 'runtime') return;
+    if (old?.source==='log'&&old.status==='running'&&tool.source==='runtime'&&tool.statusMissing) {
+      // An explicit invocation remains pending until its completion. A sparse
+      // runtime summary may confirm presence, but cannot invent a new start.
+      old.seenRunningAtMs=tool.reportedAtMs??old.seenRunningAtMs;
+      return;
+    }
     if (old) tool = { ...old, ...tool, startedAtMs: tool.startedAtMs ?? old.startedAtMs,
       observedStartedAtMs: old.observedStartedAtMs ?? tool.observedStartedAtMs, seenRunningAtMs: tool.seenRunningAtMs ?? old.seenRunningAtMs,
       timingStartAtMs: tool.timingStartAtMs ?? old.timingStartAtMs,
@@ -175,6 +187,21 @@ export class ThreadState {
     }
     if (row.type === 'token_usage_record') {
       this.applyUsage({ usage: p.usage, total: p.thread_token_usage ?? p.total_token_usage }, at); return;
+    }
+    if(row.type==='response_item') {
+      // Sleep summaries have no status in the desktop store. Pair the explicit
+      // call/result lifecycle instead of treating every historical summary as live.
+      if(p.type==='function_call'&&p.call_id&&(p.name==='clock.sleep'||p.namespace==='clock'&&p.name==='sleep')) {
+        this.lastActivityAt=Math.max(this.lastActivityAt,at);
+        this.addTool(normalizeTool({id:p.call_id,type:'sleep'},{source:'log',completed:false,timestamp:at,startedAtMs:at,turnId:p.turn_id??this.latestTurnId}));
+      } else if(p.type==='function_call_output'&&p.call_id) {
+        const old=this.tools.get(p.call_id);
+        if(old?.name==='sleep'&&!['completed','failed','interrupted'].includes(old.status)) {
+          this.lastActivityAt=Math.max(this.lastActivityAt,at);
+          this.addTool(normalizeTool({id:p.call_id,type:'sleep'},{source:'log',completed:true,timestamp:at,startedAtMs:old.startedAtMs,completedAtMs:at,turnId:old.turnId}));
+        }
+      }
+      return;
     }
     if (row.type !== 'event_msg') return;
     this.lastActivityAt = Math.max(this.lastActivityAt, at);
@@ -258,6 +285,12 @@ export class ThreadState {
         if (item.type === 'contextCompaction') { turn.wasCompaction = true; if (item.completed === false) { turn.phase = 'compacting'; turn.compactionStartedAtMs ??= item.startedAtMs ?? now; } }
         this.addTool(normalizeTool(item, { turnId: turn.id, timestamp: now, startedAtMs: item.startedAtMs, completedAtMs: item.completedAtMs, source: 'runtime' }));
       }
+      if(Array.isArray(t.items)) {
+        const present=new Set(t.items.map(i=>String(i.id)));
+        for(const tool of this.tools.values()) if(tool.turnId===turn.id&&tool.source==='runtime'&&tool.status==='running'&&!present.has(tool.id)) {
+          tool.status='unknown';tool.executionStatus='unknown';
+        }
+      }
     }
     const latest = this.turns.get(this.latestTurnId);
     if (latest && !latest.completedAtMs && data.threadStatus?.activeFlags?.some(flag => /waiting/i.test(flag))) {
@@ -265,18 +298,21 @@ export class ThreadState {
     }
     const currentRuntime = latest && data.turns.find(t=>(t.id??t.turnId)===latest.id);
     if (latest && (currentRuntime || data.threadStatus?.activeFlags?.some(flag=>/waiting/i.test(flag)))) {
-      const runningTools = [...this.tools.values()].some(t=>t.turnId===latest.id && ['running','unknown'].includes(t.status));
+      const runningTools = [...this.tools.values()].some(t=>t.turnId===latest.id && (t.status==='running'||t.status==='unknown'&&t.observedStartedAtMs!=null));
       // This is time in an observed active model phase, including response and
       // provider/network waiting. It is not a measurement of pure reasoning.
       const modelActive = !!currentRuntime && /^(inprogress|in_progress|active|running)$/i.test(currentRuntime.status??'') && !runningTools;
       observeTiming(latest,now,{modelActive});
       observeActivity(latest,[...this.tools.values()].filter(t=>t.turnId===latest.id),now);
     }
-    else if (latest) { latest.timingObservation=null; latest.liveActivity=null; }
+    else if (latest) {
+      this.pauseTiming(true);
+      for(const tool of this.tools.values())if(tool.turnId===latest.id&&tool.source==='runtime'&&tool.status==='running'){tool.status='unknown';tool.executionStatus='unknown';}
+    }
   }
   snapshot(now = Date.now(), runtimeConnected = false) {
     const turn = this.turns.get(this.latestTurnId);
-    if (!runtimeConnected) this.pauseTiming();
+    if (!runtimeConnected) this.pauseTiming(true);
     const all = [...this.tools.values()].map(t => !runtimeConnected && t.status === 'running' && t.source === 'runtime' ? { ...t, status: 'unknown' } : t)
       .sort((a, b) => (b.startedAtMs ?? b.completedAtMs ?? 0) - (a.startedAtMs ?? a.completedAtMs ?? 0));
     const current = all.filter(t => t.turnId === this.latestTurnId);

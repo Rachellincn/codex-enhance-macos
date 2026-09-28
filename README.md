@@ -15,7 +15,7 @@
 
 ## 快速开始
 
-1. 下载 [**CodexEnhance-v0.3.0-win-x64.zip**](https://github.com/hrx114514x/codex-enhance/releases/download/v0.3.0/CodexEnhance-v0.3.0-win-x64.zip)，完整解压。
+1. 下载 [**CodexEnhance-v0.3.1-win-x64.zip**](https://github.com/hrx114514x/codex-enhance/releases/download/v0.3.1/CodexEnhance-v0.3.1-win-x64.zip)，完整解压。
 2. 确认已安装并登录 Windows Codex 桌面客户端。
 3. 双击 **Start Codex.cmd**。
 

@@ -24,7 +24,8 @@ public partial class MainWindow
         var items = (a?["items"] as JsonArray ?? new()).OfType<JsonObject>().ToArray();
         if(kind=="tools"&&items.Length>0) {
             int index=(int)(elapsed/3000)%items.Length;
-            detail=items.Length>1?$"{items.Length} 项并行 · {S(items[index]["label"],"工具调用")}  {index+1}/{items.Length}":S(items[0]["label"],"工具调用")+" · 执行中";
+            int count=(int)(N(a?["runningCount"])??items.Length);
+            detail=count>1?$"{count} 项并行 · {S(items[index]["label"],"工具调用")}"+(count==items.Length?$"  {index+1}/{items.Length}":""):S(items[0]["label"],"工具调用")+" · 执行中";
         }
         return (title,detail,Clock(elapsed),true);
     }
