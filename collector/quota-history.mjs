@@ -50,7 +50,7 @@ export class QuotaHistory {
     if(existing?.sample?.checkedAtMs>quota.checkedAtMs)return;
     const entry=safeEntry({accountKey:quota.accountKey,plan:quota.plan,startMs:window.startMs,resetsAtMs:window.resetsAtMs,
       firstObservedAtMs:existing?.firstObservedAtMs??quota.checkedAtMs,resetDetected:existing?.resetDetected||window.resetDetected,
-      priceDate:PRICE_DATE,sample:{checkedAtMs:quota.checkedAtMs,usedPercent:window.usedPercent,usage}});
+      priceDate:aggregate.pricingDate??PRICE_DATE,sample:{checkedAtMs:quota.checkedAtMs,usedPercent:window.usedPercent,usage}});
     if(!entry)return;
     // During transient indexing errors keep the last valid pair; don't replace
     // a useful historical snapshot with an incomplete scan.

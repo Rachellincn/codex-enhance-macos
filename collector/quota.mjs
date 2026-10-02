@@ -2,8 +2,9 @@ import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { Worker } from 'node:worker_threads';
-import { PRICE_DATE, quotaOptions, quotaAmount } from './pricing.mjs';
+import { quotaOptions, quotaAmount } from './pricing.mjs';
 import { QuotaHistory } from './quota-history.mjs';
+import { PricingUpdates } from './pricing-updates.mjs';
 
 // Two read-only account methods; never refresh auth, buy credits or consume resets.
 export async function readAccountQuota() {
@@ -47,16 +48,17 @@ export function equivalentWindow(window, usage, ready, options) {
     estimateReasons: reasons, confidence: total == null ? 'insufficient' : usage.unattributedRequests || usage.assumedTierRequests ? 'low' : 'local_estimate' };
 }
 export class WeeklyQuota {
-  constructor(home, stateDir) {
+  constructor(home, stateDir, {pricingUpdates} = {}) {
     this.options = quotaOptions();
     this.home = home; this.stateDir = stateDir; this.view = { state: 'checking', windows: [] }; this.nextAt = 0; this.pending = null; this.revision = 0; this.session = null; this.worker = null; this.queryId = 0;
     fs.mkdirSync(stateDir, { recursive: true }); const file = path.join(stateDir, 'usage-salt');
     this.history = new QuotaHistory(stateDir);
+    this.pricing=pricingUpdates??new PricingUpdates(stateDir);this.pricingRevision=this.pricing.catalog.revision;
     try { this.salt = fs.readFileSync(file, 'utf8').trim(); } catch { this.salt = randomBytes(24).toString('hex'); fs.writeFileSync(file, this.salt); }
     this.observationFile = path.join(stateDir, 'quota-observation.json');
     try { const saved = JSON.parse(fs.readFileSync(this.observationFile, 'utf8')); if (Array.isArray(saved.windows) && /^[a-f0-9]{64}$/.test(saved.accountKey ?? '')) this.rawQuota = saved; } catch {}
   }
-  refresh() { this.nextAt = Math.min(this.nextAt, Date.now() + 2500); }
+  refresh() { this.nextAt = Math.min(this.nextAt, Date.now() + 2500); this.pricing.refresh(); }
   setOptions(options) { this.options = quotaOptions(options); }
   ensureWorker() {
     if (this.worker) return;
@@ -64,12 +66,23 @@ export class WeeklyQuota {
     this.worker.on('message', data => {
       if (data.queryId !== this.queryId || this.rawQuota?.accountKey !== data.accountKey) return;
       this.aggregate = data;
-      if (data.complete) this.history.record(this.rawQuota,data);
+      if (data.complete) {
+        this.history.record(this.rawQuota,data);
+        this.pricing.observeMissing(data.windows?.flatMap(w=>w.models??[])??[]);
+      }
     });
     this.worker.on('error', () => { this.aggregate = { error: true }; this.worker = null; });
   }
   sample(session) {
     const now = Date.now();
+    const pricing=this.pricing.sample();
+    if(this.pricingRevision!==this.pricing.catalog.revision) {
+      this.pricingRevision=this.pricing.catalog.revision;
+      // Reprice the same timestamped token ledger; do not re-read old logs or
+      // mix a newer numerator with an older percentage.
+      this.aggregate=null;
+      if(this.view.state==='ready'&&this.rawQuota?.windows?.length) this.queryUsage(this.rawQuota);
+    }
     if (session !== this.session) { this.session = session; this.revision++; this.pending = null; this.nextAt = 0; this.view = { state: 'checking', windows: [] }; }
     if (!session) return { state: 'unavailable', reason: 'client_disconnected', windows: [] };
     if (!this.pending && now >= this.nextAt) {
@@ -87,19 +100,22 @@ export class WeeklyQuota {
           try { const temp = this.observationFile + `.${process.pid}.tmp`; fs.writeFileSync(temp, JSON.stringify(quota)); fs.renameSync(temp, this.observationFile); } catch {}
         }
         if (quota.state === 'ready' && quota.windows.length) {
-          this.ensureWorker(); this.worker.postMessage({ type: 'query', queryId: ++this.queryId, quota });
+          this.queryUsage(quota);
         }
       }).catch(() => { if (revision === this.revision) this.view = { state: 'unavailable', reason: 'quota_unavailable', windows: [] }; })
         .finally(() => { if (revision === this.revision) this.pending = null; });
     }
     const quota = this.view;
-    if (quota.state !== 'ready') return { ...quota, checking: !!this.pending };
+    if (quota.state !== 'ready') return { ...quota, checking: !!this.pending, pricing };
     if (now - quota.checkedAtMs > 180000 || quota.windows.some(w => w.resetsAtMs <= now)) return { state: 'unavailable', reason: 'stale', windows: [] };
     const a = this.aggregate;
     return { state: 'ready', plan: quota.plan, checkedAtMs: quota.checkedAtMs, indexing: !a?.complete, indexProgress: a?.progress ?? 0, checking: !!this.pending,
       windows: quota.windows.map(w => equivalentWindow(w, a?.windows?.find(x => x.minutes === w.minutes) ?? { usd: null, requests: 0, tokens: 0, unpricedRequests: 0, parseErrors: a?.error ? 1 : 0 }, !!a?.complete, this.options)),
-      options: this.options, pricingDate: PRICE_DATE, scope: 'local_openai', indexError: !!a?.error,
+      options: this.options, pricingDate: a?.pricingDate??this.pricing.catalog.verifiedAt, pricing, scope: 'local_openai', indexError: !!a?.error,
       history: this.history.view(quota.accountKey,equivalentWindow,this.options,now) };
   }
-  async close() { this.revision++; this.session = null; await this.worker?.terminate(); this.worker = null; }
+  queryUsage(quota) {
+    this.ensureWorker();this.worker.postMessage({type:'query',queryId:++this.queryId,quota,pricing:this.pricing.catalog});
+  }
+  async close() { this.revision++; this.session = null; this.pricing.close(); await this.worker?.terminate(); this.worker = null; }
 }

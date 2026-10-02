@@ -7,6 +7,12 @@ The compact quota view shows the account's remaining percentage, reset countdown
 
 These settings do not change Codex's model, context or speed settings. They survive companion restarts and recalculate from cached numeric components immediately. API replacement cost is independent of both switches and stays in the collapsed calculation details.
 
+## Price updates
+
+Model rates and their speed/long-context multipliers come from a validated data catalog, including GPT-6.1 Sol's $0.10/M cached-input rate. The companion checks this project's public price catalog at startup and every six hours; the existing Refresh button also checks it. Missing-model observations trigger an earlier bounded check. Downloads contain no account or usage data, execute no code, and retain the last valid catalog when unavailable.
+
+A newer catalog reprices existing token records at the same quota observation cutoff; it does not re-ingest or double-count old requests. Current-period history stores the catalog date used by that aggregate. Previously archived periods keep their recorded components and date. See [price-catalog maintenance](pricing-updates.md).
+
 ## Calculation
 
 The quota basis counts uncached input, cached input and output separately. Cache writes use the ordinary input rate, without the API cache-write surcharge. Astra's long-context premium is optional, following the Codex exception documented in the official rate card. Other supported models retain their applicable long-context rates. Published credit rates and API-dollar references are an estimation basis, not an official fixed subscription dollar cap.

@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { JsonlTail } from './tail.mjs';
 import { UsageLedger, keyed } from './usage-ledger.mjs';
 import { priceUsage } from './pricing.mjs';
+import {BUNDLED_PRICING,validatePricing} from './price-catalog.mjs';
 
 const { home, stateDir, salt } = workerData;
 const db = new DatabaseSync(path.join(stateDir, 'weekly-usage.sqlite'));
@@ -56,7 +57,7 @@ function discover(start) {
   }
   return [...files.values()].sort((a,b) => a.file.localeCompare(b.file));
 }
-function totals(window, quota, scanErrors) {
+function totals(window, quota, scanErrors, pricing) {
   const accountFilter = 'AND (? IS NULL OR account_key IS NULL OR account_key=?)';
   const validIssue = "AND (scope_key IS NULL OR NOT EXISTS (SELECT 1 FROM records WHERE records.scope_key=issues.scope_key AND kind='ledger'))";
   const parseErrors = db.prepare(`SELECT count(*) AS n FROM issues WHERE at>=? AND at<=? ${accountFilter} ${validIssue}`).get(window.startMs, quota.checkedAtMs, quota.accountKey, quota.accountKey).n;
@@ -72,7 +73,7 @@ function totals(window, quota, scanErrors) {
     out.requests++; out.input += r.input; out.output += r.output; out.cached += r.cached ?? 0; out.tokens += r.input + r.output;
     if (r.kind === 'ledger') out.ledgerRequests++; else out.legacyRequests++;
     if (!r.account_key || !quota.accountKey) out.unattributedRequests++;
-    const price = priceUsage(r); const model = models.get(r.model) ?? { model: r.model, requests: 0, usd: 0, unpriced: 0 };
+    const price = priceUsage(r,pricing); const model = models.get(r.model) ?? { model: r.model, requests: 0, usd: 0, unpriced: 0 };
     model.requests++;
     if (!price) { out.unpricedRequests++; out.unpricedTokens += r.input + r.output; model.unpriced++; }
     else {
@@ -90,6 +91,8 @@ function totals(window, quota, scanErrors) {
   return out;
 }
 async function processQuery(query) {
+  const pricing=query.pricing?validatePricing(query.pricing):BUNDLED_PRICING;
+  if(!pricing)throw Error('Invalid price catalog');
   const start = Math.min(...query.quota.windows.map(w => w.startMs));
   const files = discover(start);
   // A rewritten/truncated source invalidates checkpoints. Rebuild only our cache.
@@ -130,7 +133,8 @@ async function processQuery(query) {
   db.prepare('DELETE FROM records WHERE at<?').run(Math.min(Date.now()-21*86400000, start-86400000));
   db.prepare('DELETE FROM issues WHERE at<?').run(Math.min(Date.now()-21*86400000, start-86400000));
   return { queryId: query.queryId, accountKey: query.quota.accountKey, complete: true, progress: 1, files: files.length,
-    windows: query.quota.windows.map(w => totals(w, query.quota, errors)) };
+    pricingDate:pricing.verifiedAt,pricingRevision:pricing.revision,
+    windows: query.quota.windows.map(w => totals(w, query.quota, errors,pricing)) };
 }
 async function pump() {
   if (running) return; running = true;
