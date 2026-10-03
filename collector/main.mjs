@@ -2,21 +2,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import readline from 'node:readline';
+import { stateDirectory } from './platform.mjs';
 import { Catalog } from './catalog.mjs';
 import { DesktopLink } from './cdp.mjs';
 import { CapabilityMonitor } from './capabilities.mjs';
 import { WeeklyQuota } from './quota.mjs';
 import {VoiceUsage} from './voice.mjs';
+import {AppServerQuota} from './app-server.mjs';
+import {resolveSelection} from './selection.mjs';
 
 const args = process.argv.slice(2);
 const value = (flag, fallback) => args.includes(flag) ? args[args.indexOf(flag) + 1] : fallback;
 const home = value('--home', process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'));
-const stateDir = value('--state-dir', path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'CodexEnhance'));
+const stateDir = value('--state-dir', stateDirectory());
 const seed = value('--thread', null);
 const catalog = new Catalog(home), desktop = new DesktopLink(stateDir);
 const capabilities = new CapabilityMonitor();
 const weekly = new WeeklyQuota(home, stateDir);
-const voiceUsage = new VoiceUsage(stateDir);
+const voiceUsage = args.includes('--no-voice') ? {sample:()=>null, inspect:()=>{}, close:()=>{}} : new VoiceUsage(stateDir);
+const account = process.platform === 'darwin' && !args.includes('--cdp-quota-only') ? new AppServerQuota() : null;
 let manualId = seed, lockedId = null, follow = true, lastId = null, stopping = false;
 let timedState = null;
 const pauseTiming = (preserveActivity=false) => { timedState?.pauseTiming(preserveActivity); timedState = null; };
@@ -47,16 +51,16 @@ while (!stopping) {
     const selectionReset = Boolean(selected && catalog.isInternal(selected));
     if (selectionReset) { lockedId = null; manualId = null; follow = true; }
     const current = await desktop.poll(lockedId ?? (!follow ? manualId : null));
-    const id = lockedId ?? (!follow ? manualId : current.threadId ?? (!desktop.connected ? manualId : null));
+    const recentThreads = catalog.recent();
+    const {id, selection} = resolveSelection({lockedId,manualId,follow,connected:desktop.connected,currentId:current.threadId,recentId:recentThreads[0]?.id,allowLatest:args.includes('--follow-latest')});
     if(timedState&&id&&timedState.id!==id)pauseTiming(true);
     else if(!id||!current.runtime)pauseTiming(true);
-    const selection = lockedId ? 'locked' : !follow || (!desktop.connected && manualId) ? 'manual' : id ? 'auto' : 'none';
     const toolHealth = capabilities.sample(desktop.activeSession, id, Boolean(current.runtime));
-    const quota = weekly.sample(desktop.activeSession);
+    const quota = weekly.sample(account ?? desktop.activeSession);
+    quota.source = account ? 'app-server' : 'cdp';
     const voice = voiceUsage.sample(desktop.activeSession,id);
     const connection = { cdp: desktop.connected ? 'connected' : 'waiting', runtime: Boolean(current.runtime), selection, selectionReset,
       message: !desktop.connected ? '下次正常启动 Codex 后启用自动跟随' : current.ambiguous ? '多个会话可见，请点击要跟随的输入区' : !id ? '当前页面没有可识别的本地任务' : '' };
-    const recentThreads = catalog.recent();
     if (id) {
       const data = catalog.sample(id);
       if (data) {
@@ -71,4 +75,4 @@ while (!stopping) {
   if (args.includes('--once')) break;
   await new Promise(r => setTimeout(r, Math.max(100, 900 - (Date.now() - start))));
 }
-voiceUsage.close(); desktop.close(); catalog.close(); rl.close(); await weekly.close();
+account?.close(); voiceUsage.close(); desktop.close(); catalog.close(); rl.close(); await weekly.close();

@@ -58,7 +58,7 @@ export class WeeklyQuota {
     this.observationFile = path.join(stateDir, 'quota-observation.json');
     try { const saved = JSON.parse(fs.readFileSync(this.observationFile, 'utf8')); if (Array.isArray(saved.windows) && /^[a-f0-9]{64}$/.test(saved.accountKey ?? '')) this.rawQuota = saved; } catch {}
   }
-  refresh() { this.nextAt = Math.min(this.nextAt, Date.now() + 2500); this.pricing.refresh(); }
+  refresh() { this.nextAt = 0; this.pricing.refresh(); }
   setOptions(options) { this.options = quotaOptions(options); }
   ensureWorker() {
     if (this.worker) return;
@@ -84,10 +84,11 @@ export class WeeklyQuota {
       if(this.view.state==='ready'&&this.rawQuota?.windows?.length) this.queryUsage(this.rawQuota);
     }
     if (session !== this.session) { this.session = session; this.revision++; this.pending = null; this.nextAt = 0; this.view = { state: 'checking', windows: [] }; }
-    if (!session) return { state: 'unavailable', reason: 'client_disconnected', windows: [] };
+    const history = () => this.history.view(this.rawQuota?.accountKey,equivalentWindow,this.options,now);
+    if (!session) return { state: 'unavailable', reason: 'client_disconnected', windows: [], history: history(), historyCached: true };
     if (!this.pending && now >= this.nextAt) {
       const revision = this.revision; this.nextAt = now + 60000;
-      this.pending = session.evaluate(`(${readAccountQuota.toString()})()`, 7000).then(raw => {
+      this.pending = (session.readQuota ? session.readQuota() : session.evaluate(`(${readAccountQuota.toString()})()`, 7000)).then(raw => {
         if (revision !== this.revision) return;
         const quota = normalizeQuota(raw, this.salt);
         const previous = this.rawQuota;
@@ -106,8 +107,8 @@ export class WeeklyQuota {
         .finally(() => { if (revision === this.revision) this.pending = null; });
     }
     const quota = this.view;
-    if (quota.state !== 'ready') return { ...quota, checking: !!this.pending, pricing };
-    if (now - quota.checkedAtMs > 180000 || quota.windows.some(w => w.resetsAtMs <= now)) return { state: 'unavailable', reason: 'stale', windows: [] };
+    if (quota.state !== 'ready') return { ...quota, checking: !!this.pending, pricing, history: history(), historyCached: true };
+    if (now - quota.checkedAtMs > 180000 || quota.windows.some(w => w.resetsAtMs <= now)) return { state: 'unavailable', reason: 'stale', windows: [], history: history(), historyCached: true };
     const a = this.aggregate;
     return { state: 'ready', plan: quota.plan, checkedAtMs: quota.checkedAtMs, indexing: !a?.complete, indexProgress: a?.progress ?? 0, checking: !!this.pending,
       windows: quota.windows.map(w => equivalentWindow(w, a?.windows?.find(x => x.minutes === w.minutes) ?? { usd: null, requests: 0, tokens: 0, unpricedRequests: 0, parseErrors: a?.error ? 1 : 0 }, !!a?.complete, this.options)),

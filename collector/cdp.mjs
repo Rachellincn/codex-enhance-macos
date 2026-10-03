@@ -2,6 +2,7 @@
 // Copyright (c) 2026 contributors, MIT; original notice in licenses/.
 import fs from 'node:fs';
 import path from 'node:path';
+import { devtoolsFile } from './platform.mjs';
 
 export class CdpSession {
   constructor(target) { this.target = target; this.pending = new Map(); this.nextId = 1; this.closed = false; }
@@ -181,7 +182,7 @@ export class DesktopLink {
   async discover() {
     const ports = new Set(this.fallbackPorts);
     const configFiles = [path.join(this.stateDir, 'connection.json')];
-    if (this.includeAppPort) configFiles.push(path.join(process.env.APPDATA ?? '', 'Codex', 'DevToolsActivePort'));
+    if (this.includeAppPort) configFiles.push(devtoolsFile());
     for (const file of configFiles) {
       try { const raw = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''); const port = Number(file.endsWith('.json') ? JSON.parse(raw).port : raw.split(/\r?\n/)[0]); if (port >= 1024 && port <= 65535) ports.add(port); } catch {}
     }

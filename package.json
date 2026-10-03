@@ -3,9 +3,15 @@
   "version": "0.4.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "collector": "node --no-warnings collector/main.mjs"
-  }
+    "collector": "node --no-warnings collector/main.mjs",
+    "build:mac": "bash scripts/build-macos.sh",
+    "start:mac": "bash \"Start Codex.command\"",
+    "package:mac": "bash scripts/package-macos.sh"
+  },
+  "macVersion": "0.4.0-mac.4"
 }

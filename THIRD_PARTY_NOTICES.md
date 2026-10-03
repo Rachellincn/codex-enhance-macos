@@ -1,5 +1,10 @@
 # Third-party notices
 
+- **Codex Enhance**, by hrx114514x and upstream contributors.
+  Source: https://github.com/hrx114514x/codex-enhance
+  This macOS integration is based on upstream commit `f55ee83` (v0.4.0), reuses its collector and retains the Windows source and third-party notices. The SwiftUI / AppKit interface, macOS transport and packaging, expanded local pricing, and current-window tool details are additions in this repository. The upstream snapshot does not include a top-level project license; the component licenses below apply to their respective components. No new license is asserted for upstream code.
+
+
 - **Codex Usage Monitor for Windows**, MIT, Copyright (c) 2026 contributors.
   Source: https://github.com/JiaYang-BUAA/Codex-Desktop-Usage-Monitor-Windows/tree/e0f1a18750df0f2489d68e7205d190dce2a61513
   `collector/tail.mjs` and `collector/cdp.mjs` adapt its incremental reader, CDP request transport and DOM selection approach. Substantial modifications add bounded buffers, focus/ambiguity handling and read-only runtime observation.

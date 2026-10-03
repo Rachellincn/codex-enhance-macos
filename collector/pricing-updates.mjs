@@ -4,7 +4,7 @@ import {BUNDLED_PRICING,validatePricing} from './price-catalog.mjs';
 
 // Public data only: no model names, account identifiers, usage or credentials
 // leave the computer. Never download or evaluate executable update code.
-export const PRICING_URL='https://raw.githubusercontent.com/hrx114514x/codex-enhance/main/collector/prices.json';
+export const PRICING_URL='https://raw.githubusercontent.com/Rachellincn/codex-enhance-macos/main/collector/prices.json';
 export const PRICING_INTERVAL_MS=6*60*60*1000;
 const MAX_BYTES=64*1024;
 async function readLimited(response) {

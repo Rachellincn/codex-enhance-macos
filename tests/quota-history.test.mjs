@@ -62,3 +62,18 @@ test('an early reset archives the replaced window without treating it as a secon
  assert.equal(rows[0].closed,false);assert.equal(rows[1].closed,true);assert.equal(rows[1].adjusted,true);
  assert.equal(rows[1].observationGapMs,200000);assert.equal(rows[1].usedPercent,50);
 });
+
+test('independent quota refresh works without CDP and saved history remains available offline',async t=>{
+ const {WeeklyQuota}=await import('../collector/quota.mjs');
+ const {root}=setup(t),now=Date.now();
+ const pricing={catalog:{revision:1,verifiedAt:'2026-10-03'},sample:()=>({}),refresh:()=>{},close:()=>{}};
+ const weekly=new WeeklyQuota(root,root,{pricingUpdates:pricing});t.after(()=>weekly.close());
+ weekly.queryUsage=()=>{};
+ let reads=0;
+ const source={readQuota:async()=>{reads++;return {authType:'chatgpt',plan:'team',accountId:'private',checkedAtMs:now,windows:[{minutes:10080,usedPercent:40,resetsAt:Math.floor(now/1000)+3600}]};}};
+ weekly.sample(source);await weekly.pending;
+ const ready=weekly.sample(source);assert.equal(ready.state,'ready');assert.equal(ready.windows[0].remainingPercent,60);assert.equal(reads,1);
+ weekly.history.record(weekly.rawQuota,aggregate());
+ weekly.refresh();weekly.sample(source);await weekly.pending;assert.equal(reads,2);
+ const offline=weekly.sample(null);assert.equal(offline.state,'unavailable');assert.equal(offline.historyCached,true);assert.equal(offline.history.entries.length,1);assert.equal(offline.windows.length,0);
+});

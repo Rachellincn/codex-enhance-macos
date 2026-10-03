@@ -21,3 +21,6 @@ docs/native-search-verification.md
 .env.*
 !.env.example
 *.log
+
+# macOS metadata
+.DS_Store
