@@ -8,6 +8,13 @@
 
 这是独立社区项目，与 OpenAI 没有官方关联。
 
+<p>
+  <img src="docs/screenshots/macos-calculation.png" width="380" alt="macOS 深色浮窗：账号额度与计算明细" />
+  <img src="docs/screenshots/macos-current-window.png" width="380" alt="macOS 深色浮窗：当前窗口与工具调用详情" />
+</p>
+
+*macOS 原生界面：计算明细与当前窗口。*
+
 ## 快速开始
 
 1. 安装并登录 Codex 桌面客户端；使用 **macOS 13.5 或更高版本、Apple Silicon（M 系列）Mac**。

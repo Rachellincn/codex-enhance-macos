@@ -8,6 +8,13 @@ This project integrates [hrx114514x/codex-enhance](https://github.com/hrx114514x
 
 This is an independent community project with no official affiliation with OpenAI.
 
+<p>
+  <img src="docs/screenshots/macos-calculation.png" width="380" alt="Native macOS dark window: account quota and calculation details" />
+  <img src="docs/screenshots/macos-current-window.png" width="380" alt="Native macOS dark window: current window and tool-call details" />
+</p>
+
+*Native macOS interface: calculation details and current window.*
+
 ## Quick start
 
 1. Install and sign in to the Codex desktop client. Use **macOS 13.5 or later on an Apple Silicon (M-series) Mac**.
