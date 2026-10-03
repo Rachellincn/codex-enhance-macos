@@ -2,7 +2,7 @@
 
 **See what Codex is doing and how local usage is estimated.**
 
-[中文](README.md) · [English](README.en.md) · [Download DMG](https://github.com/Rachellincn/codex-enhance-macos/releases/latest) · [Report an issue](https://github.com/Rachellincn/codex-enhance-macos/issues)
+[Download DMG](https://github.com/Rachellincn/codex-enhance-macos/releases/latest) · [中文](README.md) · [English](README.en.md) · [Report an issue](https://github.com/Rachellincn/codex-enhance-macos/issues)
 
 This project integrates [hrx114514x/codex-enhance](https://github.com/hrx114514x/codex-enhance), reuses its Node.js collector from upstream commit `f55ee83` (v0.4.0), and ports the interface to a **native macOS SwiftUI / AppKit floating window**. Thanks to the upstream author and contributors. This repository expands the model pricing catalog, improves quota calculations and weekly history, and adds **tool-call details for the current window**. The upstream Windows source is retained; visit the original project for Windows releases.
 

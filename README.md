@@ -2,7 +2,7 @@
 
 **看清 Codex 正在做什么，也看清本机用量如何折算。**
 
-[中文](README.md) · [English](README.en.md) · [下载 DMG](https://github.com/Rachellincn/codex-enhance-macos/releases/latest) · [反馈问题](https://github.com/Rachellincn/codex-enhance-macos/issues)
+[下载 DMG](https://github.com/Rachellincn/codex-enhance-macos/releases/latest) · [中文](README.md) · [English](README.en.md) · [反馈问题](https://github.com/Rachellincn/codex-enhance-macos/issues)
 
 本项目集成自 [hrx114514x/codex-enhance](https://github.com/hrx114514x/codex-enhance)，基于上游 `f55ee83`（v0.4.0）复用 Node.js 采集层，并移植为 **macOS 原生 SwiftUI / AppKit 浮窗**。感谢上游作者和贡献者。本仓库新增并完善模型价格表、额度计算与每周历史，加入**当前窗口的工具调用详情**。保留上游 Windows 源码；Windows 使用请访问上游项目。
 
