@@ -22,7 +22,7 @@ For each request, B is the quota basis without Astra's optional surcharge, L is 
 Total estimate = selected cost / observed used fraction.
 Remaining estimate = max(0, total estimate - selected cost).
 
-GPT-6 / GPT-5.6 Fast uses a 2.5 subscription factor; the API Fast price is separately 2. Unknown speeds use the Standard assumption; only the expanded details show their current-window count and the alternative total if all unknown-speed requests were Fast. The UI does not force a $2000 or any other target capacity.
+GPT-6 / GPT-5.6 Fast uses a 2.5 subscription factor; the API Fast price is separately 2. Unknown speeds use the Standard assumption; the expanded details show their current-window count without adding a hypothetical Fast amount. With zero recorded Fast requests the row says "No Fast usage recorded". The estimate switch only includes documented multipliers and never turns on Codex Fast mode. The UI does not force a $2000 or any other target capacity.
 
 ## Account and period
 
@@ -37,6 +37,8 @@ Cost, request counts and missing-metadata counts all filter request timestamps f
 A worker incrementally reads sessions and archived_sessions and writes only the companion cache. Response-ID records take precedence over UI token_count mirrors in the same thread/turn; distinct response IDs remain distinct. Legacy-only turns, mirrored copies, fork boundaries, third-party providers and append checkpoints are handled separately.
 
 Schema 3 rebuilds the derived cache to store timestamped parse issues. Only matching-period, matching-or-unknown-account issues can block that window's estimate. Old and future errors do not enter current-period warnings. Untimed errors stay separately identifiable in details and are not asserted to belong to the current period. An incomplete file scan still withholds the projection.
+
+Schema 4 rebuilds the derived index to correct stale Fast assignments. Tier evidence is scoped to the current turn; a fresh settings snapshot with no tier clears the earlier value, and a response-specific tier never changes the next request. A new turn without fresh tier evidence is unknown and receives no Fast premium. This migration also recomputes the active weekly sample; original Codex logs are unchanged.
 
 Prompts, replies, commands, credentials, raw account IDs and full source paths are not stored in the usage cache. IDs use salted hashes. Source logs are never modified.
 

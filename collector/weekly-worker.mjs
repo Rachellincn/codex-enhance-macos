@@ -9,10 +9,11 @@ import {BUNDLED_PRICING,validatePricing} from './price-catalog.mjs';
 
 const { home, stateDir, salt } = workerData;
 const db = new DatabaseSync(path.join(stateDir, 'weekly-usage.sqlite'));
-// Replay the companion cache to timestamp parse issues as well as usage.
+// Rebuild tier assignments from original records after removing unscoped Fast
+// inheritance. This drops only the disposable companion index, never source logs.
 // Response-ID ledger remains authoritative over UI counters in the same turn.
-if (db.prepare('PRAGMA user_version').get().user_version !== 3) {
-  db.exec('BEGIN; DROP TABLE IF EXISTS records; DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS issues; PRAGMA user_version=3; COMMIT;');
+if (db.prepare('PRAGMA user_version').get().user_version !== 4) {
+  db.exec('BEGIN; DROP TABLE IF EXISTS records; DROP TABLE IF EXISTS files; DROP TABLE IF EXISTS issues; PRAGMA user_version=4; COMMIT;');
 }
 db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=1000;
  CREATE TABLE IF NOT EXISTS files (key TEXT PRIMARY KEY, identity TEXT, offset INTEGER, state TEXT, errors INTEGER);

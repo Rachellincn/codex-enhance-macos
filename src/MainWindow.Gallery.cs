@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Media;
@@ -21,6 +23,7 @@ public partial class MainWindow
           {"state":"ready","plan":"pro","pricingDate":"2026-09-27","indexing":false,"windows":[{"minutes":10080,"usedPercent":24,"remainingPercent":76,"quotaBaseUsd":60,"quotaFastPremiumUsd":24,"astraPremiumUsd":8,"astraFastPremiumUsd":3,"usd":102,"requests":128,"tokens":18200000,"estimateReasons":[]}]}
           """);
         data["quota"]!["checkedAtMs"] = now;
+        data["quota"]!["windows"]![0]!["fastRequests"]=16;
         data["voice"]=new JsonObject { ["state"]="observed",["reportedPhase"]="active",["checkedAtMs"]=now,["billingVerified"]=false };
         data["quota"]!["windows"]![0]!["startMs"] = now - 3 * 86400000L;
         data["quota"]!["windows"]![0]!["resetsAtMs"] = now + 4 * 86400000L;
@@ -93,6 +96,37 @@ public partial class MainWindow
         OpenModels(this,new RoutedEventArgs());CaptureGalleryDetail(Path.Combine(directory,"upstream-model-light.png"));
         OpenQuotaHistory(this,new RoutedEventArgs());CaptureGalleryDetail(Path.Combine(directory,"weekly-history-light.png"));
         detailWindow?.Close();detailWindow=null;
+        VerifyFastPresentation(data,directory);
+    }
+    private static IEnumerable<DependencyObject> GalleryNodes(DependencyObject node)
+    {
+        yield return node;
+        foreach(var child in LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>())
+            foreach(var descendant in GalleryNodes(child))yield return descendant;
+    }
+    private void VerifyFastPresentation(JsonObject data,string directory)
+    {
+        bool savedFast=settings.QuotaNormalizeFast,savedAstra=settings.QuotaIncludeAstraLongContext;
+        settings.QuotaNormalizeFast=true;settings.QuotaIncludeAstraLongContext=false;
+        string[] OpenDetails(JsonObject sample)
+        {
+            ApplySnapshot(sample);OpenQuota(this,new RoutedEventArgs());
+            var button=GalleryNodes(detailWindow!).OfType<System.Windows.Controls.Button>().Single(b=>System.Windows.Automation.AutomationProperties.GetName(b)=="展开计算明细");
+            button.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));detailWindow!.UpdateLayout();
+            GalleryNodes(detailWindow).OfType<System.Windows.Controls.ScrollViewer>().First().ScrollToBottom();detailWindow.UpdateLayout();
+            return GalleryNodes(detailWindow).OfType<System.Windows.Controls.TextBlock>().Select(t=>t.Text).ToArray();
+        }
+        var noFast=data.DeepClone().AsObject();var w=noFast["quota"]!["windows"]![0]!;
+        w["fastRequests"]=0;w["quotaFastPremiumUsd"]=0;w["astraFastPremiumUsd"]=0;
+        w["assumedTierRequests"]=20;w["unknownSpeedPremiumUsd"]=500;
+        var none=OpenDetails(noFast);
+        bool noFastClear=none.Contains("未记录 Fast 用量")&&none.Any(t=>t.Contains("20 条未记录速度"))&&!none.Any(t=>t.Contains("若这些请求"));
+        CaptureGalleryDetail(Path.Combine(directory,"quota-no-fast.png"));
+        var recorded=OpenDetails(data);bool recordedFastPreserved=recorded.Contains("+$24.00")&&!recorded.Contains("未记录 Fast 用量");
+        CaptureGalleryDetail(Path.Combine(directory,"quota-recorded-fast.png"));
+        settings.QuotaNormalizeFast=savedFast;settings.QuotaIncludeAstraLongContext=savedAstra;
+        detailWindow?.Close();detailWindow=null;ApplySnapshot(data);
+        File.WriteAllText(Path.Combine(directory,"fast-display-check.json"),System.Text.Json.JsonSerializer.Serialize(new {noFastClear,recordedFastPreserved,passed=noFastClear&&recordedFastPreserved},Settings.JsonOptions));
     }
     private void CaptureGalleryDetail(string file)
     {

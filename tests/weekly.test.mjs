@@ -71,7 +71,7 @@ test('persistent worker deduplicates mirror orders and copies, adds new tails, a
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'codex-weekly-')); const home=path.join(root,'home'), stateDir=path.join(root,'cache');
   fs.mkdirSync(path.join(home,'sessions'),{recursive:true});fs.mkdirSync(path.join(home,'archived_sessions'),{recursive:true});fs.mkdirSync(stateDir);
   const oldCache=new DatabaseSync(path.join(stateDir,'weekly-usage.sqlite'));
-  oldCache.exec("CREATE TABLE records(key TEXT PRIMARY KEY); INSERT INTO records VALUES('bad-old-index'); CREATE TABLE files(key TEXT PRIMARY KEY);");oldCache.close();
+  oldCache.exec("CREATE TABLE records(key TEXT PRIMARY KEY); INSERT INTO records VALUES('bad-old-index'); CREATE TABLE files(key TEXT PRIMARY KEY); PRAGMA user_version=3;");oldCache.close();
   const at=Date.now()-10000, stamp=n=>new Date(at+n).toISOString(), usage=n=>({input_tokens:1000*n,cached_input_tokens:800*n,cache_write_input_tokens:0,output_tokens:10*n});
   const rows=[{type:'session_meta',timestamp:stamp(0),payload:{id:'task',model_provider:'openai',creator_account_id:'acct'}},{type:'turn_context',timestamp:stamp(1),payload:{turn_id:'turn',model:'gpt-6-astra',service_tier:'default'}}];
   const record=(id,time,total)=>({type:'token_usage_record',timestamp:stamp(time),payload:{thread_id:'task',turn_id:'turn',response_id:id,usage:usage(1),thread_token_usage:usage(total)}});
@@ -108,6 +108,8 @@ test('persistent worker deduplicates mirror orders and copies, adds new tails, a
     {type:'token_usage_record',timestamp:stamp(-500000),payload:{thread_id:'unattributed',response_id:'old-missing-fields',usage:usage(100)}},
     {type:'token_usage_record',timestamp:stamp(700),payload:{thread_id:'unattributed',response_id:'current-missing-fields',usage:usage(1)}}];
   fs.writeFileSync(path.join(home,'sessions','unknown.jsonl'),unknown.map(r=>JSON.stringify(r)).join('\n')+'\n');
-  const current=await query(9);assert.equal(current.windows[0].unattributedRequests,1);assert.equal(current.windows[0].assumedTierRequests,1);assert.equal(current.windows[0].requests,6);
+  // The separate legacy turn has no tier either; it must not inherit the
+  // previous turn's default (or a stale Fast setting).
+  const current=await query(9);assert.equal(current.windows[0].unattributedRequests,1);assert.equal(current.windows[0].assumedTierRequests,3);assert.equal(current.windows[0].requests,6);
   const after=await query(10,at+800);assert.equal(after.windows[0].requests,0);assert.equal(after.windows[0].unattributedRequests,0);assert.equal(after.windows[0].assumedTierRequests,0);assert.equal(after.windows[0].parseErrors,0);
 });

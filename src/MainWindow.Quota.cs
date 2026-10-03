@@ -64,7 +64,7 @@ public partial class MainWindow
             toggle.Click += (_,_) => { changed(toggle.IsChecked == true); Save(); SendQuotaOptions(); refreshDetail?.Invoke(); };
         }
         Switch("计入 Astra 长上下文加价", "仅调整等效估算。超过 272K 输入时，输入/缓存 ×2、输出 ×1.5；Codex Astra 默认不计入。", settings.QuotaIncludeAstraLongContext, v => settings.QuotaIncludeAstraLongContext=v);
-        Switch("Fast 折算普通额度", "已记录的 Fast 按对应订阅倍率折算（GPT-6 / 5.6 为 2.5 倍）。关闭后按普通速度基价统计，不改变 Codex 的速度设置。", settings.QuotaNormalizeFast, v => settings.QuotaNormalizeFast=v);
+        Switch("计入已记录的 Fast 倍率", "只换算有 Fast 记录的用量；未记录速度的请求按普通速度估算。此开关不会开启 Codex 的 Fast 模式。", settings.QuotaNormalizeFast, v => settings.QuotaNormalizeFast=v);
         var disclosure = new Button { Content = "计算明细  ›", FontSize = 11, Foreground = BrushFor("Muted"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0,10,0,0), Padding = new Thickness(0,5,6,5) };
         var links=new DockPanel(); stack.Children.Add(links);
         var historyButton=new Button { Content="每周记录  ›", FontSize=11, Foreground=BrushFor("Muted"), Margin=new Thickness(0,10,0,0), Padding=new Thickness(6,5,0,5) };
@@ -125,11 +125,11 @@ public partial class MainWindow
                     MetricRow(details,"本机用量")(CompactNumber(N(w["requests"]))+" 次 · "+CompactNumber(N(w["tokens"]))+" tokens");
                     MetricRow(details,"任务普通计价")(Money(N(w["quotaBaseUsd"])));
                     MetricRow(details,"Astra 长上下文")(settings.QuotaIncludeAstraLongContext?"+"+Money(N(w["astraPremiumUsd"])):"未计入");
-                    MetricRow(details,"Fast 折算")(settings.QuotaNormalizeFast?"+"+Money((N(w["quotaFastPremiumUsd"])??0)+(settings.QuotaIncludeAstraLongContext?N(w["astraFastPremiumUsd"])??0:0)):"未换算");
+                    MetricRow(details,"Fast 用量折算")((N(w["fastRequests"])??0)<=0?"未记录 Fast 用量":settings.QuotaNormalizeFast?"+"+Money((N(w["quotaFastPremiumUsd"])??0)+(settings.QuotaIncludeAstraLongContext?N(w["astraFastPremiumUsd"])??0:0)):"未计入");
                     MetricRow(details,"API 标价等效")(Money(N(w["usd"])));
                     Note(details,"总额 ≈ 已用等效 ÷ 已用比例。金额为本机模型用量估算，非官方余额；不含语音或其他设备。");
                     if (N(w["unattributedRequests"])>0) Note(details,$"本周期 {N(w["unattributedRequests"]):0} 条记录未标明账号，已纳入本机统计。");
-                    if (settings.QuotaNormalizeFast && N(w["assumedTierRequests"])>0) Note(details,$"本周期 {N(w["assumedTierRequests"]):0} 条未记录速度，暂按普通速度。"+(figures.UnknownTotal is null?"":"若这些请求全为 Fast，总额约 "+Money(figures.UnknownTotal)+"。"));
+                    if (N(w["assumedTierRequests"])>0) Note(details,$"本周期 {N(w["assumedTierRequests"]):0} 条未记录速度，按普通速度估算，未计入 Fast 加价。");
                     if (N(w["unscopedParseErrors"])>0) Note(details,$"另有 {N(w["unscopedParseErrors"]):0} 条记录无法确定时间，未算作本周期异常。");
                     if (N(w["excludedAccountRequests"])>0) Note(details,$"已排除 {N(w["excludedAccountRequests"]):0} 条其他账号记录。");
                     Note(details,"统计区间 "+LocalTime(N(w["startMs"]))+" — "+LocalTime(N(q?["checkedAtMs"])));
